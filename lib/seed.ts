@@ -1,0 +1,135 @@
+import type { Lead } from "./types";
+
+function message(
+  id: string,
+  role: Lead["messages"][number]["role"],
+  text: string,
+  at: string,
+): Lead["messages"][number] {
+  return { id, role, text, at };
+}
+
+export function seedLeads(): Lead[] {
+  return [
+    {
+      id: "lead-sarah",
+      name: "Sarah Mitchell",
+      email: "sarah.mitchell@example.com",
+      phone: "+447700900111",
+      countryCode: "GB",
+      channel: "whatsapp",
+      program: "egyptian",
+      planId: "private-30",
+      stage: "new",
+      rep: "Asmaa",
+      currency: "GBP",
+      notes: "Wants evening lessons after work.",
+      messages: [
+        message(
+          "msg-sarah-1",
+          "customer",
+          "Hello from London. I would like a free trial in Egyptian Arabic and the price of weekly private lessons.",
+          "2026-09-28T09:15:00.000Z",
+        ),
+      ],
+      createdAt: "2026-09-28T09:15:00.000Z",
+      updatedAt: "2026-09-28T09:15:00.000Z",
+    },
+    {
+      id: "lead-omar",
+      name: "Omar Hassan",
+      email: "omar.hassan@example.com",
+      phone: "+201000000002",
+      countryCode: "EG",
+      channel: "whatsapp",
+      program: "quranic",
+      planId: "private-60",
+      stage: "qualified",
+      rep: "Kamal",
+      currency: "EGP",
+      notes: "Asking for his son, age 10. Residence is Egypt, so no live trial.",
+      messages: [
+        message(
+          "msg-omar-1",
+          "customer",
+          "I am in Cairo and I want Quran classes for my son. Do you have a free trial?",
+          "2026-09-28T11:00:00.000Z",
+        ),
+      ],
+      createdAt: "2026-09-28T11:00:00.000Z",
+      updatedAt: "2026-09-28T11:00:00.000Z",
+    },
+    {
+      id: "lead-fatima",
+      name: "Fatima Al Nahyan",
+      email: "fatima.alnahyan@example.com",
+      phone: "+971500000003",
+      countryCode: "AE",
+      channel: "whatsapp",
+      program: "gulf",
+      planId: "private-30",
+      stage: "trial_offered",
+      rep: "Rebeb",
+      currency: "AED",
+      notes: "Gulf exception. Trial lesson is allowed.",
+      messages: [
+        message(
+          "msg-fatima-1",
+          "customer",
+          "I live in Abu Dhabi. Can I try a class before I pay? I want Gulf Arabic.",
+          "2026-09-29T08:40:00.000Z",
+        ),
+      ],
+      createdAt: "2026-09-29T08:40:00.000Z",
+      updatedAt: "2026-09-29T08:40:00.000Z",
+    },
+    {
+      id: "lead-priya",
+      name: "Priya Shah",
+      email: "priya.shah@example.com",
+      phone: "+919800000004",
+      countryCode: "IN",
+      channel: "site",
+      program: "msa",
+      planId: "standard",
+      stage: "new",
+      rep: "Ram",
+      currency: "USD",
+      notes: "India is Asia, so no live trial. Quote the Standard month.",
+      messages: [
+        message(
+          "msg-priya-1",
+          "customer",
+          "Hi from Mumbai. What is the price for 8 classes a month?",
+          "2026-09-29T14:05:00.000Z",
+        ),
+      ],
+      createdAt: "2026-09-29T14:05:00.000Z",
+      updatedAt: "2026-09-29T14:05:00.000Z",
+    },
+    {
+      id: "lead-lukas",
+      name: "Lukas Weber",
+      email: "lukas.weber@example.com",
+      phone: "+491510000005",
+      countryCode: "DE",
+      channel: "email",
+      program: "egyptian",
+      planId: "intensive",
+      stage: "negotiating",
+      rep: "",
+      currency: "EUR",
+      notes: "Asked for a discount. Hand pricing exceptions to Islam Yehia.",
+      messages: [
+        message(
+          "msg-lukas-1",
+          "customer",
+          "Können Sie mir einen Rabatt geben? I want a discount on the intensive plan.",
+          "2026-09-30T07:20:00.000Z",
+        ),
+      ],
+      createdAt: "2026-09-30T07:20:00.000Z",
+      updatedAt: "2026-09-30T07:20:00.000Z",
+    },
+  ];
+}
