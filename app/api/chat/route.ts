@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { latestUserText, replyWithoutGrok } from "@/lib/assistant";
+import { applyFirstReplyGuard } from "@/lib/firstReply";
 import { getUsdToEgp } from "@/lib/frankfurter";
 import { draftWithGrok, grokCredentials } from "@/lib/grok";
 import { CATALOG } from "@/lib/pricing";
@@ -111,11 +112,21 @@ export async function POST(request: Request) {
       messages: turns,
       executeTool: (name, args) => executeDeskTool(name, args, fx, fxError),
     });
+    const guarded = applyFirstReplyGuard({
+      reply: drafted.text,
+      customerMessage: context.customerMessage,
+      customerName: context.customerName,
+      program: context.program,
+      rep: context.rep,
+      notes: context.notes,
+      userText,
+    });
     return NextResponse.json({
-      message: drafted.text,
+      message: guarded.text,
       source: "grok",
       model: drafted.model,
       toolsUsed: drafted.toolsUsed,
+      firstReplyRewritten: guarded.rewritten,
     });
   } catch (error) {
     const grokError = error instanceof Error ? error.message : "Grok failed.";

@@ -32,6 +32,8 @@ npm start
 
 Set `XAI_API_KEY` on Vercel (or `GROK_API_KEY` if that is the name you use) before Assist can write a real draft. Without a key, Assist says Grok is not connected and does not invent a customer reply. If the salesperson asks for a price or a trial decision, it shows only the verified tool facts.
 
+A first customer message is answered in this order: understand, build trust, qualify, personalize, and only then a trial or a price. The draft is a short WhatsApp welcome and one discovery question. Trial eligibility can appear in the note to the salesperson. It does not open the customer message. If a model draft still leads with a trial or a price list, the desk replaces that customer draft before showing it.
+
 Leads start empty. Admin has an optional **Load demo data** button. It stays off until someone clicks it. Those samples are not real customers.
 
 ## Product rules

@@ -20,7 +20,16 @@ type UiTurn = {
   toolsUsed?: string[];
 };
 
-const PROMPTS = ["Check trial eligibility", "Show package prices"];
+const PROMPTS = [
+  {
+    label: "Rep note: trial eligibility",
+    text: "Internal note only for me, not a customer draft. Is a trial allowed for this residence? Keep the answer in the note to the salesperson.",
+  },
+  {
+    label: "Rep note: price book",
+    text: "Internal note only for me, not a customer draft. Show the package prices in the note to the salesperson. Do not write prices into a customer message.",
+  },
+];
 
 export function AssistDesk() {
   const params = useSearchParams();
@@ -107,7 +116,8 @@ export function AssistDesk() {
   function draftRequest(): string {
     const paste = customerMessage.trim();
     return [
-      "Draft a customer reply for me to copy. Do not send it.",
+      "Draft a short WhatsApp reply for me to copy. Do not send it.",
+      "If they did not ask for a price or a trial, welcome them and ask one discovery question. Do not open with a trial, a package, or a price.",
       "",
       paste ? `Customer message:\n${paste}` : "No customer message was pasted.",
     ].join("\n");
@@ -190,8 +200,8 @@ export function AssistDesk() {
         <p className="kicker">Assist</p>
         <h1>Draft the next reply</h1>
         <p className="lede">
-          Paste what the customer wrote. Name, country, programme, and notes stay blank until you learn them.
-          Grok drafts a reply for you to copy. Nothing is sent.
+          Paste what the customer wrote. A first reply is a warm welcome and one question.
+          Trial and prices wait until they ask, or until you have qualified them. Nothing is sent.
         </p>
       </header>
       <div className="assist-grid">
@@ -199,7 +209,7 @@ export function AssistDesk() {
           <div className="chat-log" ref={logRef} aria-live="polite">
             {turns.length === 0 ? (
               <p className="muted">
-                Customer context starts empty. Paste their message, then draft with Grok. Trial and prices are checked only from the tools.
+                Customer context starts empty. Paste their message, then draft with Grok. The first reply should not open with a trial or a price list.
               </p>
             ) : null}
             {turns.map((turn, index) => (
@@ -230,8 +240,8 @@ export function AssistDesk() {
           </div>
           <div className="chips">
             {PROMPTS.map((prompt) => (
-              <button key={prompt} type="button" onClick={() => send(prompt)} disabled={pending}>
-                {prompt}
+              <button key={prompt.label} type="button" onClick={() => send(prompt.text)} disabled={pending}>
+                {prompt.label}
               </button>
             ))}
           </div>

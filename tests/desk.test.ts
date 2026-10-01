@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { replyWithoutGrok } from "../lib/assistant";
+import { applyFirstReplyGuard, firstDraftViolations } from "../lib/firstReply";
 import { COUNTRIES } from "../lib/countries";
 import { stubResult } from "../lib/integrations";
 import { cairoCalendarDay, clearFxCache, getUsdToEgp, parseFrankfurter } from "../lib/frankfurter";
@@ -263,6 +264,78 @@ test("Grok prompt carries the production rules and stays blank without context",
   assert.match(filled, /Gulf\/Khaliji/);
   assert.match(filled, /Wants evenings/);
   assert.doesNotMatch(filled, /OPTIONAL CONTEXT is blank/);
+
+  const ahmed = buildGrokSystem({
+    customerName: "Ahmed",
+    countryCode: "DE",
+    program: "egyptian",
+    rep: "Asmaa",
+    customerMessage: "hey i want to start online sessions",
+  });
+  assert.match(ahmed, /UNDERSTAND → BUILD TRUST → QUALIFY → PERSONALIZE/);
+  assert.match(ahmed, /Do not open with a trial/);
+  assert.match(ahmed, /one discovery question/i);
+  assert.match(ahmed, /THIS MESSAGE IS EARLY/);
+  assert.match(ahmed, /Hey Ahmed, good to hear from you/);
+});
+
+test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
+  const bad = [
+    "Note to the salesperson",
+    "Germany is eligible for a free 30-minute live trial. Keep that internal.",
+    "",
+    "Draft to copy",
+    "Hey Ahmed! You can start with a free trial.",
+    "Our most popular 16 × 60-minute package is £128.",
+    "Sign up at https://signup.learnarabic08.com/",
+  ].join("\n");
+
+  const guarded = applyFirstReplyGuard({
+    reply: bad,
+    customerName: "Ahmed",
+    customerMessage: "hey i want to start online sessions",
+    program: "egyptian",
+    rep: "Asmaa",
+    userText: "what should I reply?",
+  });
+
+  assert.equal(guarded.rewritten, true);
+  assert.equal(firstDraftViolations(guarded.customerDraft).length, 0);
+  assert.match(guarded.customerDraft, /Ahmed/);
+  assert.match(guarded.customerDraft, /Egyptian Arabic/);
+  assert.match(guarded.customerDraft, /one-to-one/);
+  assert.match(guarded.customerDraft, /Asmaa/);
+  assert.equal((guarded.customerDraft.match(/\?/g) ?? []).length, 1);
+  assert.doesNotMatch(guarded.customerDraft, /trial/i);
+  assert.doesNotMatch(guarded.customerDraft, /most popular/i);
+  assert.doesNotMatch(guarded.customerDraft, /16\s*[×x]\s*60/i);
+  assert.doesNotMatch(guarded.customerDraft, /£|€|\$|\bGBP\b|\b128\b/);
+  assert.doesNotMatch(guarded.customerDraft, /signup\.learnarabic|https?:\/\//i);
+  assert.match(guarded.note, /Germany is eligible/);
+  assert.doesNotMatch(guarded.customerDraft, /eligible/i);
+
+  const unheaded = "Hi Ahmed, book a free 30-minute trial. The most popular 16×60 is £128.";
+  const fromDump = applyFirstReplyGuard({
+    reply: unheaded,
+    customerName: "Ahmed",
+    customerMessage: "hey i want to start online sessions",
+    program: "egyptian",
+    rep: "Asmaa",
+    userText: "Draft a short WhatsApp reply for me to copy.",
+  });
+  assert.equal(fromDump.rewritten, true);
+  assert.equal(firstDraftViolations(fromDump.customerDraft).length, 0);
+  assert.doesNotMatch(fromDump.customerDraft, /trial|most popular|£/i);
+
+  const priceAsk = applyFirstReplyGuard({
+    reply: "Draft to copy\nThe 16 × 60-minute package is £128.",
+    customerMessage: "how much is the 16 session package?",
+    customerName: "Ahmed",
+    program: "egyptian",
+    rep: "Asmaa",
+  });
+  assert.equal(priceAsk.rewritten, false);
+  assert.match(priceAsk.customerDraft, /£128/);
 });
 
 test("empty shifts are configuration required and integrations stay stubs", () => {
