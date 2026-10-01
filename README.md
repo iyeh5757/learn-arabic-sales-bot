@@ -2,6 +2,8 @@
 
 Standalone Next.js sales desk (Mode A) for Learn Arabic Academy reps. It is not embedded in the marketing site.
 
+Drafts follow `docs/MASTER_AI_SALES_OPERATING_SPEC.md` (the owner operating spec, sections 1–136) plus a Mode A overlay in `lib/prompt.ts`. The overlay outranks any instruction in the spec to send WhatsApp, book a trial, or take payment. Where the spec marks EGP pricing and the exact trial location list as not configured, `get_pricing` (Frankfurter EGP from the USD price) and `check_trial_eligibility` are the configured backends. The model must call those tools and must not invent a rate or a location list.
+
 Reps use **Assist** to draft replies, **Leads** to track the pipeline, and **Admin** to set shifts and inspect the price book. Evolution, Meta, Google, and payments are stubs: the desk acknowledges them and does not call those providers.
 
 ## Run
