@@ -24,11 +24,22 @@ type UiTurn = {
 
 const DRAFT_CLIENT_TIMEOUT_MS = 190_000;
 
-function visibleUserText(content: string): string {
-  if (!content.startsWith("Draft a short WhatsApp reply")) return content;
-  const pasted = content.split("Customer message:\n")[1]?.trim() ?? "";
-  if (!pasted || pasted.startsWith("No customer message")) return "Draft a reply";
-  return `Draft a reply\n\n${pasted}`;
+function visibleUserTurn(content: string): { kind: "customer" | "desk"; text: string } {
+  const said = content.match(/Customer just said:\s*([\s\S]*)$/i)?.[1]?.trim() ?? "";
+  if (content.startsWith("The customer just said this")) {
+    if (!said || said.startsWith("(nothing")) return { kind: "customer", text: "Draft a reply" };
+    return { kind: "customer", text: said };
+  }
+  if (content.startsWith("Draft a short WhatsApp reply")) {
+    const pasted = content.split("Customer message:\n")[1]?.trim() ?? "";
+    if (!pasted || pasted.startsWith("No customer message")) return { kind: "customer", text: "Draft a reply" };
+    return { kind: "customer", text: pasted };
+  }
+  if (/^(Desk question only|Internal note only)\b/.test(content)) {
+    const lines = content.split("\n").map((line) => line.trim()).filter(Boolean);
+    return { kind: "desk", text: lines[lines.length - 1] || content };
+  }
+  return { kind: "customer", text: content };
 }
 
 function timeoutMessage(error: unknown): string | null {
@@ -55,11 +66,13 @@ const PROMPTS = [
 function AssistantDraft({
   turn,
   footer,
+  rep,
   onCopyDraft,
   onCopyNote,
 }: {
   turn: UiTurn;
   footer: string;
+  rep: string;
   onCopyDraft: (text: string) => void;
   onCopyNote: (text: string) => void;
 }) {
@@ -80,14 +93,16 @@ function AssistantDraft({
   return (
     <article className="draft-result">
       {presented.draft ? (
-        <div className="draft-card">
-          <div className="draft-card-head">
-            <p className="kicker">Draft to copy</p>
-            <button className="btn" type="button" onClick={() => onCopyDraft(presented.draft)}>
-              Copy draft
+        <div className="wa-bubble">
+          <div className="draft-body">{presented.draft}</div>
+          <div className="wa-foot">
+            <p className={rep ? "sign-as" : "sign-as missing"}>
+              {rep ? `Signing as ${rep}` : "No rep selected. This draft is unsigned."}
+            </p>
+            <button className="wa-copy" type="button" onClick={() => onCopyDraft(presented.draft)}>
+              Copy
             </button>
           </div>
-          <div className="draft-body">{presented.draft}</div>
         </div>
       ) : null}
       {presented.showNote ? (
@@ -193,14 +208,24 @@ export function AssistDesk() {
     };
   }
 
+  function hasCustomerDraft(): boolean {
+    return turns.some((turn) => turn.role === "assistant" && turn.source === "grok" && presentReply(turn.content).draft);
+  }
+
   function draftRequest(): string {
     const paste = customerMessage.trim();
+    const said = paste ? `Customer just said:\n${paste}` : "Customer just said:\n(nothing pasted)";
+    if (hasCustomerDraft()) {
+      return ["The customer just said this. Write the next WhatsApp reply. Do not welcome them again.", said].join("\n\n");
+    }
+    return ["The customer just said this. Draft the WhatsApp reply for me to copy. Do not send it.", said].join("\n\n");
+  }
+
+  function deskQuestion(text: string): string {
     return [
-      "Draft a short WhatsApp reply for me to copy. Do not send it.",
-      "If they only said they want to start, welcome them and ask one question about their level or their goal.",
-      "",
-      paste ? `Customer message:\n${paste}` : "No customer message was pasted.",
-    ].join("\n");
+      "Desk question only. This is not the customer speaking. Do not add it to their goal, level, or schedule.",
+      text.trim(),
+    ].join("\n\n");
   }
 
   async function send(text: string) {
@@ -307,8 +332,7 @@ export function AssistDesk() {
         <p className="kicker">Assist</p>
         <h1>Draft the next reply</h1>
         <p className="lede">
-          Paste what the customer wrote. A first reply is a warm welcome and one question.
-          Trial and prices wait until they ask, or until you have qualified them. Nothing is sent.
+          Put what the customer just wrote in their own box. Ask the desk something separate when you need a fact. Nothing is sent.
         </p>
       </header>
       <div className="assist-grid">
@@ -324,29 +348,31 @@ export function AssistDesk() {
                 <AssistantDraft
                   key={`${turn.role}-${index}`}
                   turn={turn}
+                  rep={rep}
                   footer={sourceLabel(turn)}
                   onCopyDraft={(text) => void copyText(text, "Draft copied. It was not sent.")}
                   onCopyNote={(text) => void copyText(text, "Internal note copied. It was not sent.")}
                 />
               ) : (
-                <article key={`${turn.role}-${index}`} className="bubble user">
-                  {visibleUserText(turn.content)}
+                <article key={`${turn.role}-${index}`} className={`bubble ${visibleUserTurn(turn.content).kind}`}>
+                  {visibleUserTurn(turn.content).kind === "desk" ? <span className="desk-kicker">Desk</span> : null}
+                  {visibleUserTurn(turn.content).text}
                 </article>
               ),
             )}
             {pending ? <p className="muted">Drafting… this can take a minute.</p> : null}
           </div>
           <label className="field">
-            <span>Customer message</span>
+            <span>Customer&apos;s latest reply</span>
             <textarea
               value={customerMessage}
               onChange={(event) => setCustomerMessage(event.target.value)}
-              placeholder="Paste the customer's message. Leave this blank if you are only checking a fact."
+              placeholder="What they just sent. One word is enough, like family or weekends."
             />
           </label>
           <div className="row">
-            <button className="btn" type="button" onClick={() => void send(draftRequest())} disabled={pending}>
-              Draft with Grok
+            <button className="btn" type="button" onClick={() => void send(draftRequest())} disabled={pending || !customerMessage.trim()}>
+              Draft reply
             </button>
           </div>
           <div className="chips">
@@ -360,26 +386,26 @@ export function AssistDesk() {
             className="composer"
             onSubmit={(event) => {
               event.preventDefault();
-              void send(input);
+              void send(deskQuestion(input));
             }}
           >
             <label className="field">
-              <span>Note to the desk</span>
+              <span>Question for the desk</span>
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    void send(input);
+                    void send(deskQuestion(input));
                   }
                 }}
-                placeholder="Ask Grok something about this conversation."
+                placeholder="Ask about eligibility or a price. This is not the customer's words."
               />
             </label>
             <div className="row">
               <button className="btn" type="submit" disabled={pending || !input.trim()}>
-                Send
+                Ask the desk
               </button>
               <button className="btn ghost" type="button" onClick={() => void copyText(lastCopyText, "Draft copied. It was not sent.")} disabled={!canCopy}>
                 Copy draft

@@ -1,5 +1,5 @@
 import { COUNTRIES } from "./countries";
-import { customerAskedPrice, customerAskedTrial, discoveryDone } from "./firstReply";
+import { customerAskedPrice, customerAskedTrial, customerUtterance, discoveryDone, discoverySlotsLookFilled } from "./firstReply";
 import { listCurrencyForCountry } from "./money";
 import { buildPriceBook, CATALOG, planById, type PriceBook } from "./pricing";
 import { trialEligibility } from "./trial";
@@ -110,14 +110,17 @@ export function selectDeskTools(input: {
   userText: string;
   customerMessage?: string;
   notes?: string;
+  history?: string;
 }): typeof GROK_TOOLS {
   const user = input.userText;
   const customer = input.customerMessage ?? "";
+  const spoken = customerUtterance(user);
   const internal = INTERNAL_NOTE.test(user);
-  const askedTrial = customerAskedTrial(customer) || customerAskedTrial(user);
-  const askedPrice = customerAskedPrice(customer) || customerAskedPrice(user);
-  const askedCurrency = /\bcurrency\b/i.test(`${user}\n${customer}`);
-  const done = discoveryDone(input.notes, user);
+  const askedTrial = customerAskedTrial(customer) || customerAskedTrial(spoken) || customerAskedTrial(user);
+  const askedPrice = customerAskedPrice(customer) || customerAskedPrice(spoken) || customerAskedPrice(user);
+  const askedCurrency = /\bcurrency\b/i.test(`${spoken}\n${customer}`);
+  const done = discoveryDone(input.notes, spoken);
+  const slotsFilled = discoverySlotsLookFilled(customer, input.notes, input.history, spoken);
 
   const names = new Set<string>();
   if (done) {
@@ -133,6 +136,7 @@ export function selectDeskTools(input: {
     names.add("get_customer_currency");
   }
   if (askedCurrency) names.add("get_customer_currency");
+  if (slotsFilled) names.add("check_trial_eligibility");
 
   return GROK_TOOLS.filter((tool) => names.has(tool.function.name));
 }
