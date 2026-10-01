@@ -1,4 +1,5 @@
 import { COUNTRIES } from "./countries";
+import { customerAskedPrice, customerAskedTrial, discoveryDone } from "./firstReply";
 import { listCurrencyForCountry } from "./money";
 import { buildPriceBook, CATALOG, planById, type PriceBook } from "./pricing";
 import { trialEligibility } from "./trial";
@@ -40,7 +41,7 @@ export const GROK_TOOLS = [
     function: {
       name: "get_pricing",
       description:
-        "Owner package prices for private 1-to-1 lessons. Call this before quoting any price. Returns USD, GBP, EUR, and AED list prices, and EGP only when today's Frankfurter rate is loaded. AED is not calculated from USD.",
+        "Owner package prices for private 1-to-1 lessons. Call this before quoting any price. Do not call it during discovery when no price will be quoted. Returns USD, GBP, EUR, and AED list prices, and EGP only when today's Frankfurter rate is loaded. AED is not calculated from USD.",
       parameters: {
         type: "object",
         properties: {
@@ -64,7 +65,7 @@ export const GROK_TOOLS = [
     function: {
       name: "check_trial_eligibility",
       description:
-        "Decide whether a residence can have one free 30-minute live trial. Eligible outside Africa and Asia, with Gulf exceptions AE, SA, KW, QA, BH, and OM. Blank or unknown country is not a yes and not a denial of a known residence.",
+        "Decide whether a residence can have one free 30-minute live trial. Call only when the customer asked about a trial, the salesperson asked for an internal eligibility check, or discovery is done and a trial will be offered. Do not call it during discovery just to record that a country is eligible. Eligible outside Africa and Asia, with Gulf exceptions AE, SA, KW, QA, BH, and OM. Blank or unknown country is not a yes and not a denial of a known residence.",
       parameters: {
         type: "object",
         properties: {
@@ -98,6 +99,43 @@ export const GROK_TOOLS = [
     },
   },
 ];
+
+const INTERNAL_NOTE = /\binternal note only\b|\brep note\b/i;
+
+/**
+ * Discovery drafts do not get price or trial tools. Those calls only add a
+ * round trip and a note the customer message will not use.
+ */
+export function selectDeskTools(input: {
+  userText: string;
+  customerMessage?: string;
+  notes?: string;
+}): typeof GROK_TOOLS {
+  const user = input.userText;
+  const customer = input.customerMessage ?? "";
+  const internal = INTERNAL_NOTE.test(user);
+  const askedTrial = customerAskedTrial(customer) || customerAskedTrial(user);
+  const askedPrice = customerAskedPrice(customer) || customerAskedPrice(user);
+  const askedCurrency = /\bcurrency\b/i.test(`${user}\n${customer}`);
+  const done = discoveryDone(input.notes, user);
+
+  const names = new Set<string>();
+  if (done) {
+    names.add("check_trial_eligibility");
+    names.add("get_pricing");
+    names.add("get_customer_currency");
+  }
+  if (askedTrial || (internal && /\btrial\b|\beligib/i.test(user))) {
+    names.add("check_trial_eligibility");
+  }
+  if (askedPrice || (internal && /\bprice|pricing|package/i.test(user))) {
+    names.add("get_pricing");
+    names.add("get_customer_currency");
+  }
+  if (askedCurrency) names.add("get_customer_currency");
+
+  return GROK_TOOLS.filter((tool) => names.has(tool.function.name));
+}
 
 export function executeDeskTool(
   name: string,

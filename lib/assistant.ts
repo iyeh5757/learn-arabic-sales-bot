@@ -1,4 +1,5 @@
 import { detectEscalation } from "./escalate";
+import { isDraftTimeout } from "./grok";
 import { formatMoney } from "./money";
 import { ESCALATION } from "./reps";
 import { executeDeskTool, type CurrencyToolResult, type FxQuote, type PricingToolResult } from "./tools";
@@ -27,10 +28,13 @@ export function replyWithoutGrok(input: {
   fx: FxQuote;
   fxError: string | null;
 }): UnconfiguredReply {
+  const timedOut = input.reason === "unavailable" && isDraftTimeout(new Error(input.grokError ?? ""));
   const headline =
     input.reason === "unconfigured"
       ? "Grok is not connected. Set XAI_API_KEY (or GROK_API_KEY) on the server before Assist can write a customer draft. No sales reply was written."
-      : `Grok did not respond${input.grokError ? ` (${input.grokError})` : ""}. No sales reply was written. Check XAI_API_KEY on the server and try again.`;
+      : timedOut
+        ? "The draft took too long. Nothing was sent. Try again."
+        : `Grok did not respond${input.grokError ? ` (${input.grokError})` : ""}. No sales reply was written. Check XAI_API_KEY on the server and try again.`;
 
   const drafting = /draft a (short )?whatsapp reply|draft a customer reply|what should i (reply|say)/i.test(
     input.userText,

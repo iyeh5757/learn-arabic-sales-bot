@@ -58,7 +58,10 @@ export async function getUsdToEgp(fetchImpl: typeof fetch = fetch): Promise<FxQu
     process.env.FRANKFURTER_URL ||
     "https://api.frankfurter.dev/v2/rates?base=USD&quotes=EGP";
 
-  const response = await fetchImpl(url, { cache: "no-store" });
+  const response = await fetchImpl(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  });
   if (!response.ok) {
     throw new Error(`Frankfurter responded ${response.status}.`);
   }

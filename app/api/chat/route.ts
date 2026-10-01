@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { latestUserText, replyWithoutGrok } from "@/lib/assistant";
-import { applyFirstReplyGuard } from "@/lib/firstReply";
+import { applyFirstReplyGuard, replyForModel } from "@/lib/firstReply";
 import { getUsdToEgp } from "@/lib/frankfurter";
-import { draftWithGrok, grokCredentials } from "@/lib/grok";
+import { draftWithGrok, grokCredentials, isDraftTimeout } from "@/lib/grok";
 import { CATALOG } from "@/lib/pricing";
 import { buildGrokSystem, type DeskContext } from "@/lib/prompt";
 import { PROGRAMS } from "@/lib/reps";
-import { executeDeskTool, type FxQuote } from "@/lib/tools";
+import { executeDeskTool, selectDeskTools, type FxQuote } from "@/lib/tools";
 import type { ChatTurn } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+/** Hobby fluid compute allows 300s. Stay under that and above the Grok budget so the handler can answer. */
+export const maxDuration = 180;
 
 const CURRENCIES = new Set(["USD", "GBP", "EUR", "AED", "EGP"]);
 const PROGRAM_IDS = new Set<string>(PROGRAMS.map((item) => item.id));
@@ -49,8 +51,9 @@ export async function POST(request: Request) {
         if (!item || typeof item !== "object") return [];
         const turn = item as { role?: unknown; content?: unknown };
         if (turn.role !== "user" && turn.role !== "assistant") return [];
-        const content = String(turn.content ?? "").slice(0, 8000);
-        if (!content.trim()) return [];
+        const raw = String(turn.content ?? "").slice(0, 8000);
+        if (!raw.trim()) return [];
+        const content = turn.role === "assistant" ? replyForModel(raw) : raw;
         return [{ role: turn.role, content }];
       })
     : [];
@@ -74,15 +77,26 @@ export async function POST(request: Request) {
     program,
     planId,
     notes: String(body.notes ?? "").slice(0, 4000),
+    followUp: turns.some((turn) => turn.role === "assistant" && /Draft to copy/i.test(turn.content)),
   };
+
+  const toolList = selectDeskTools({
+    userText,
+    customerMessage: context.customerMessage,
+    notes: context.notes,
+  });
+  context.enabledTools = toolList.map((tool) => tool.function.name);
 
   let fx: FxQuote = null;
   let fxError: string | null = null;
-  try {
-    const quote = await getUsdToEgp();
-    fx = { rate: quote.rate, date: quote.date, cairoDay: quote.cairoDay };
-  } catch (error) {
-    fxError = error instanceof Error ? error.message : "Frankfurter rate unavailable.";
+  const needsFx = toolList.some((tool) => tool.function.name === "get_pricing");
+  if (needsFx) {
+    try {
+      const quote = await getUsdToEgp();
+      fx = { rate: quote.rate, date: quote.date, cairoDay: quote.cairoDay };
+    } catch (error) {
+      fxError = error instanceof Error ? error.message : "Frankfurter rate unavailable.";
+    }
   }
 
   const creds = grokCredentials();
@@ -110,6 +124,7 @@ export async function POST(request: Request) {
     const drafted = await draftWithGrok({
       system: buildGrokSystem(context),
       messages: turns,
+      tools: toolList,
       executeTool: (name, args) => executeDeskTool(name, args, fx, fxError),
     });
     const guarded = applyFirstReplyGuard({
@@ -129,6 +144,12 @@ export async function POST(request: Request) {
       firstReplyRewritten: guarded.rewritten,
     });
   } catch (error) {
+    if (isDraftTimeout(error)) {
+      return NextResponse.json(
+        { error: "The draft took too long. Nothing was sent. Try again.", retryable: true },
+        { status: 504 },
+      );
+    }
     const grokError = error instanceof Error ? error.message : "Grok failed.";
     const local = replyWithoutGrok({
       reason: "unavailable",

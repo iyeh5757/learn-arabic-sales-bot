@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { replyWithoutGrok } from "../lib/assistant";
-import { applyFirstReplyGuard, firstDraftViolations } from "../lib/firstReply";
+import { applyFirstReplyGuard, firstDraftViolations, noteWorthShowing, presentReply, replyForModel, splitReply } from "../lib/firstReply";
 import { COUNTRIES } from "../lib/countries";
 import { stubResult } from "../lib/integrations";
 import { cairoCalendarDay, clearFxCache, getUsdToEgp, parseFrankfurter } from "../lib/frankfurter";
@@ -10,9 +10,9 @@ import { buildGrokSystem } from "../lib/prompt";
 import { CONFIGURATION_REQUIRED, shiftsStatus } from "../lib/reps";
 import { freshDesk, mergeDemoLeads } from "../lib/store";
 import { seedLeads } from "../lib/seed";
-import { executeDeskTool, type CurrencyToolResult, type PricingToolResult } from "../lib/tools";
+import { executeDeskTool, selectDeskTools, type CurrencyToolResult, type PricingToolResult } from "../lib/tools";
 import { GULF_COUNTRIES, trialEligibility } from "../lib/trial";
-import { grokCredentials } from "../lib/grok";
+import { grokCredentials, isDraftTimeout, GROK_BUDGET_MS, GROK_ROUND_TIMEOUT_MS } from "../lib/grok";
 import type { TrialDecision } from "../lib/types";
 
 const GULF = new Set<string>(GULF_COUNTRIES);
@@ -218,15 +218,27 @@ test("a missing Grok key does not invent a customer draft", () => {
   const failed = replyWithoutGrok({
     reason: "unavailable",
     userText: "Draft a customer reply for me to copy.",
-    grokError: "timeout",
+    grokError: "socket hang up",
     fx: null,
     fxError: null,
   });
   assert.equal(failed.source, "unavailable");
   assert.match(failed.text, /did not respond/);
-  assert.match(failed.text, /timeout/);
+  assert.match(failed.text, /socket hang up/);
   assert.doesNotMatch(failed.text, /Draft to copy/);
   assert.doesNotMatch(failed.text, /Verified tool facts/);
+
+  const timedOut = replyWithoutGrok({
+    reason: "unavailable",
+    userText: "Draft a customer reply for me to copy.",
+    grokError: "The operation was aborted due to timeout",
+    fx: null,
+    fxError: null,
+  });
+  assert.match(timedOut.text, /took too long/);
+  assert.match(timedOut.text, /Try again/);
+  assert.doesNotMatch(timedOut.text, /aborted due to timeout/);
+  assert.doesNotMatch(timedOut.text, /Draft to copy/);
 });
 
 test("Grok prompt carries the production rules and stays blank without context", () => {
@@ -277,6 +289,33 @@ test("Grok prompt carries the production rules and stays blank without context",
   assert.match(ahmed, /one discovery question/i);
   assert.match(ahmed, /THIS MESSAGE IS EARLY/);
   assert.match(ahmed, /Hey Ahmed, good to hear from you/);
+  assert.match(ahmed, /Do not call check_trial_eligibility on this turn/);
+  assert.match(ahmed, /Omit the salesperson note/);
+  assert.doesNotMatch(ahmed, /Call check_trial_eligibility only so the note/);
+
+  const gated = buildGrokSystem({
+    customerName: "Adam",
+    countryCode: "DE",
+    program: "egyptian",
+    rep: "Kamal",
+    customerMessage: "I want to speak with my wife's family. I don't know any Arabic.",
+    enabledTools: [],
+  });
+  assert.match(gated, /TOOLS THIS TURN: none/);
+
+  const follow = buildGrokSystem({
+    customerName: "Adam",
+    countryCode: "DE",
+    program: "egyptian",
+    rep: "Kamal",
+    notes: "Complete beginner. Goal is talking with Egyptian in-laws.",
+    customerMessage: "I want to speak with my wife's family. I don't know any Arabic.",
+    followUp: true,
+    enabledTools: [],
+  });
+  assert.match(follow, /THIS IS A FOLLOW-UP/);
+  assert.match(follow, /still missing/);
+  assert.doesNotMatch(follow, /THIS MESSAGE IS EARLY/);
 });
 
 test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
@@ -361,6 +400,99 @@ test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
   });
   assert.equal(priceAsk.rewritten, false);
   assert.match(priceAsk.customerDraft, /£128/);
+});
+
+test("a discovery draft drops routine notes and keeps the customer text", () => {
+  const screenshot = [
+    "Note to the salesperson",
+    "Checked check_trial_eligibility for DE (Germany): eligible. Do not mention the trial, eligibility, a package, or any price — they still have not asked, and the salesperson has not said discovery is done. Did not call get_pricing. Known: Egyptian, complete beginner, goal is talking with Egyptian in-laws. Still unknown: schedule. Islam Yehia does not need this thread.",
+    "",
+    "Draft to copy",
+    "That makes a lot of sense, Adam — being able to speak with your in-laws in Egyptian Arabic is a really good reason to start from the beginning.",
+    "When are you usually free for lessons — weekdays, evenings, or weekends?",
+    "Kamal",
+  ].join("\n");
+
+  const presented = presentReply(screenshot);
+  assert.equal(presented.showNote, false);
+  assert.equal(presented.note, "");
+  assert.match(presented.draft, /Adam/);
+  assert.match(presented.draft, /Kamal/);
+  assert.equal(presented.copyText, presented.draft);
+  assert.doesNotMatch(presented.copyText, /Note to the salesperson|eligible|Islam/);
+
+  const trailing = [
+    "Draft to copy",
+    "Hey Adam, weekday evenings work.",
+    "Kamal",
+    "",
+    "Note to the salesperson",
+    "Egypt is not eligible. Do not offer a trial.",
+  ].join("\n");
+  const gotcha = presentReply(trailing);
+  assert.equal(gotcha.showNote, true);
+  assert.match(gotcha.note, /not eligible/);
+  assert.doesNotMatch(gotcha.draft, /not eligible/);
+  assert.equal(splitReply(trailing).hasDraftHeading, true);
+
+  assert.equal(noteWorthShowing("None"), false);
+  assert.equal(noteWorthShowing("Escalate to Islam Yehia on +201093570811."), true);
+  assert.equal(noteWorthShowing(""), false);
+
+  const plain = presentReply("Hey Adam, when are you free?\nKamal");
+  assert.equal(plain.hasDraftHeading, false);
+  assert.equal(plain.copyText, "Hey Adam, when are you free?\nKamal");
+
+  const asked = presentReply("Note to the salesperson\nGermany is eligible for the free 30-minute trial.");
+  assert.equal(asked.showNote, true);
+  assert.match(asked.note, /eligible/);
+  assert.equal(asked.copyText, "");
+
+  const forwarded = replyForModel(screenshot);
+  assert.match(forwarded, /^Draft to copy/);
+  assert.doesNotMatch(forwarded, /check_trial_eligibility|Islam Yehia/);
+  assert.match(forwarded, /Kamal/);
+});
+
+test("discovery turns do not receive trial or price tools", () => {
+  const draft = selectDeskTools({
+    userText: [
+      "Draft a short WhatsApp reply for me to copy. Do not send it.",
+      "Customer message:",
+      "hey i want to start online sessions",
+    ].join("\n"),
+    customerMessage: "hey i want to start online sessions",
+    notes: "Complete beginner. Goal is talking with Egyptian in-laws.",
+  }).map((tool) => tool.function.name);
+  assert.deepEqual(draft, []);
+
+  const price = selectDeskTools({
+    userText: "What should I reply?",
+    customerMessage: "how much is the 16 session package?",
+  }).map((tool) => tool.function.name);
+  assert.deepEqual(price, ["get_pricing", "get_customer_currency"]);
+
+  const trial = selectDeskTools({
+    userText: "Internal note only for me, not a customer draft. Is a trial allowed for this residence?",
+    customerMessage: "hey i want to start online sessions",
+  }).map((tool) => tool.function.name);
+  assert.deepEqual(trial, ["check_trial_eligibility"]);
+
+  const ready = selectDeskTools({
+    userText: "Draft a reply",
+    customerMessage: "Sounds good",
+    notes: "discovery is done",
+  }).map((tool) => tool.function.name);
+  assert.deepEqual(ready, ["get_pricing", "check_trial_eligibility", "get_customer_currency"]);
+});
+
+test("draft timeouts are retryable and longer than the old 30 second abort", () => {
+  assert.equal(isDraftTimeout(Object.assign(new Error("aborted"), { name: "TimeoutError" })), true);
+  assert.equal(isDraftTimeout(new Error("The operation was aborted due to timeout")), true);
+  assert.equal(isDraftTimeout(new Error("socket hang up")), false);
+  assert.ok(GROK_ROUND_TIMEOUT_MS >= 90_000);
+  assert.ok(GROK_BUDGET_MS >= 150_000);
+  assert.ok(GROK_BUDGET_MS > GROK_ROUND_TIMEOUT_MS);
 });
 
 test("empty shifts are configuration required and integrations stay stubs", () => {
