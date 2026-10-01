@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildGrokSystem, customerDraft, respondLocally, type AssistInput } from "../lib/assistant";
+import { replyWithoutGrok } from "../lib/assistant";
 import { COUNTRIES } from "../lib/countries";
 import { stubResult } from "../lib/integrations";
 import { cairoCalendarDay, clearFxCache, getUsdToEgp, parseFrankfurter } from "../lib/frankfurter";
 import { buildPriceBook, CATALOG, egpFromUsd, EGP_FORMULA } from "../lib/pricing";
+import { buildGrokSystem } from "../lib/prompt";
 import { CONFIGURATION_REQUIRED, shiftsStatus } from "../lib/reps";
+import { freshDesk, mergeDemoLeads } from "../lib/store";
+import { seedLeads } from "../lib/seed";
+import { executeDeskTool, type CurrencyToolResult, type PricingToolResult } from "../lib/tools";
 import { GULF_COUNTRIES, trialEligibility } from "../lib/trial";
 import { grokCredentials } from "../lib/grok";
+import type { TrialDecision } from "../lib/types";
 
 const GULF = new Set<string>(GULF_COUNTRIES);
 
@@ -123,68 +128,141 @@ test("the USD to EGP rate is cached for the Cairo day", async () => {
   clearFxCache();
 });
 
-test("customer drafts obey trial and escalation rules", () => {
-  const egypt = respondLocally(sample({
-    countryCode: "EG",
-    currency: "EGP",
-    customerName: "Omar Hassan",
-    rep: "Kamal",
-    planId: "60x16",
-    customerMessage: "Do you have a free trial?",
-  }));
-  assert.match(egypt.text, /not available/i);
-  assert.doesNotMatch(egypt.text, /book a free 30-minute/i);
-  assert.doesNotMatch(egypt.text, /quiz/i);
-  assert.match(egypt.text, /7,495\.49/);
-  assert.match(egypt.text, /private 1-to-1/i);
-
-  const uae = respondLocally(sample({
-    countryCode: "AE",
-    currency: "AED",
-    customerName: "Fatima Al Nahyan",
-    rep: "Rebeb",
-    customerMessage: "Can I try a class before I pay?",
-  }));
-  assert.match(uae.text, /free 30-minute live trial/i);
-  assert.match(uae.text, /529\.00/);
-  assert.doesNotMatch(uae.text, /quiz/i);
-  assert.equal(uae.facts.trial.region, "gulf");
-
-  const discount = respondLocally(sample({
-    countryCode: "DE",
-    currency: "EUR",
-    customerName: "Lukas Weber",
-    customerMessage: "I want a discount on the 16-session package.",
-    planId: "60x16",
-  }));
-  assert.match(discount.text, /Islam Yehia/);
-  assert.match(discount.text, /\+201093570811/);
-  assert.doesNotMatch(discount.text, /book a free 30-minute/i);
-  assert.equal(discount.facts.escalation.required, true);
-
-  const direct = customerDraft(
-    sample({ countryCode: "GB", currency: "GBP", customerName: "Sarah Mitchell", rep: "Asmaa" }),
-    respondLocally(sample({ countryCode: "GB", currency: "GBP", customerName: "Sarah Mitchell", rep: "Asmaa" })).facts,
-  );
-  assert.match(direct, /free 30-minute live trial/i);
-  assert.match(direct, /Asmaa/);
-  assert.match(direct, /most popular/i);
-  assert.doesNotMatch(direct, /quiz/i);
+test("a fresh desk has no leads until demo data is loaded", () => {
+  const fresh = freshDesk();
+  assert.deepEqual(fresh.leads, []);
+  assert.deepEqual(fresh.shifts, []);
+  const once = mergeDemoLeads(fresh.leads);
+  assert.equal(once.added, seedLeads().length);
+  assert.equal(once.leads[0]?.name, "Sarah Mitchell");
+  const twice = mergeDemoLeads(once.leads);
+  assert.equal(twice.added, 0);
+  assert.equal(twice.leads.length, once.leads.length);
 });
 
-test("Grok prompt carries the Gulf rule and escalation contact", () => {
-  const input = sample({ countryCode: "EG" });
-  const facts = respondLocally(input).facts;
-  const prompt = buildGrokSystem(input, facts);
+test("desk tools return owner facts and a blank currency stays null", () => {
+  const fx = { rate: 52.052, date: "2026-09-30", cairoDay: "2026-10-01" };
+  const ae = executeDeskTool("check_trial_eligibility", { country_code: "ae" }, fx, null) as TrialDecision;
+  assert.equal(ae.eligible, true);
+  assert.equal(ae.region, "gulf");
+  const eg = executeDeskTool("check_trial_eligibility", { country_code: "EG" }, null, "offline") as TrialDecision;
+  assert.equal(eg.eligible, false);
+  assert.equal(eg.region, "africa");
+
+  const aed = executeDeskTool("get_customer_currency", { country_code: "AE" }, null, null) as CurrencyToolResult;
+  assert.equal(aed.currency, "AED");
+  const blank = executeDeskTool("get_customer_currency", { country_code: " " }, null, null) as CurrencyToolResult;
+  assert.equal(blank.currency, null);
+  const unknown = executeDeskTool("get_customer_currency", { country_code: "ZZ" }, null, null) as CurrencyToolResult;
+  assert.equal(unknown.currency, null);
+
+  const priced = executeDeskTool("get_pricing", { plan_id: "60x16", currency: "AED" }, fx, null) as PricingToolResult;
+  assert.equal(priced.plans.length, 1);
+  assert.equal(priced.plans[0]?.prices.USD, 144);
+  assert.equal(priced.plans[0]?.prices.AED, 529);
+  assert.equal(priced.plans[0]?.prices.EGP, 7495.49);
+
+  const missing = executeDeskTool("get_pricing", { plan_id: "60x16", currency: "EGP" }, null, "offline") as PricingToolResult;
+  assert.equal(missing.plans[0]?.prices.USD, 144);
+  assert.equal(missing.plans[0]?.prices.AED, 529);
+  assert.equal(missing.plans[0]?.prices.EGP, null);
+});
+
+test("a missing Grok key does not invent a customer draft", () => {
+  const draftOnly = replyWithoutGrok({
+    reason: "unconfigured",
+    userText: "Draft a customer reply for me to copy. Do not send it.",
+    customerMessage: "Hello, I will think about it.",
+    countryCode: "EG",
+    currency: "EGP",
+    planId: "60x16",
+    fx: { rate: 52.052, date: "2026-09-30" },
+    fxError: null,
+  });
+  assert.match(draftOnly.text, /Grok is not connected/);
+  assert.equal(draftOnly.source, "unconfigured");
+  assert.doesNotMatch(draftOnly.text, /Draft to copy/);
+  assert.doesNotMatch(draftOnly.text, /Hi /);
+  assert.doesNotMatch(draftOnly.text, /7,495/);
+  assert.doesNotMatch(draftOnly.text, /Verified tool facts/);
+
+  const trialAsk = replyWithoutGrok({
+    reason: "unconfigured",
+    userText: "Check trial eligibility",
+    customerMessage: "Do you have a free trial?",
+    countryCode: "EG",
+    fx: null,
+    fxError: "offline",
+  });
+  assert.match(trialAsk.text, /Grok is not connected/);
+  assert.match(trialAsk.text, /Verified tool facts/);
+  assert.match(trialAsk.text, /Africa/);
+  assert.match(trialAsk.text, /Eligible: no/);
+  assert.doesNotMatch(trialAsk.text, /Draft to copy/);
+  assert.doesNotMatch(trialAsk.text, /Hi /);
+
+  const priceAsk = replyWithoutGrok({
+    reason: "unconfigured",
+    userText: "What is the price of 16 sessions?",
+    planId: "60x16",
+    currency: "AED",
+    fx: null,
+    fxError: "offline",
+  });
+  assert.match(priceAsk.text, /529\.00/);
+  assert.match(priceAsk.text, /EGP is unavailable/);
+  assert.match(priceAsk.text, /Grok is not connected/);
+  assert.doesNotMatch(priceAsk.text, /Draft to copy/);
+
+  const failed = replyWithoutGrok({
+    reason: "unavailable",
+    userText: "Draft a customer reply for me to copy.",
+    grokError: "timeout",
+    fx: null,
+    fxError: null,
+  });
+  assert.equal(failed.source, "unavailable");
+  assert.match(failed.text, /did not respond/);
+  assert.match(failed.text, /timeout/);
+  assert.doesNotMatch(failed.text, /Draft to copy/);
+  assert.doesNotMatch(failed.text, /Verified tool facts/);
+});
+
+test("Grok prompt carries the production rules and stays blank without context", () => {
+  const prompt = buildGrokSystem({});
+  assert.match(prompt, /Mode A/);
+  assert.match(prompt, /creative language \/ strict facts/i);
+  assert.match(prompt, /conversation intelligence/i);
+  assert.match(prompt, /Answer the customer's actual question first/);
+  assert.match(prompt, /ONE QUESTION AT A TIME/);
+  assert.match(prompt, /get_pricing/);
+  assert.match(prompt, /check_trial_eligibility/);
+  assert.match(prompt, /get_customer_currency/);
   assert.match(prompt, /AE, SA, KW, QA, BH, and OM/);
   assert.match(prompt, /Islam Yehia/);
   assert.match(prompt, /\+201093570811/);
-  assert.match(prompt, /do not offer a free 30-minute live trial/i);
-  assert.match(prompt, /do not mention a quiz/i);
-  assert.match(prompt, /private 1-to-1/i);
-  assert.match(prompt, /Do not invent group-class packages/);
-  assert.match(prompt, /"AED": 529/);
-  assert.match(prompt, /"eligible": false/);
+  assert.match(prompt, /Do not mention a quiz/);
+  assert.match(prompt, /private 1-to-1/);
+  assert.match(prompt, /no group-class package/i);
+  assert.match(prompt, /Do not invent an EGP figure/);
+  assert.match(prompt, /Never derive AED/);
+  assert.match(prompt, /do not pretend the customer uses USD/i);
+  assert.match(prompt, /Note to the salesperson/);
+  assert.match(prompt, /Draft to copy/);
+  assert.match(prompt, /OPTIONAL CONTEXT is blank/);
+  assert.doesNotMatch(prompt, /Sarah Mitchell/);
+
+  const filled = buildGrokSystem({
+    customerName: "Nora",
+    countryCode: "ae",
+    program: "gulf",
+    notes: "Wants evenings",
+  });
+  assert.match(filled, /Nora/);
+  assert.match(filled, /"countryCode": "AE"/);
+  assert.match(filled, /Gulf\/Khaliji/);
+  assert.match(filled, /Wants evenings/);
+  assert.doesNotMatch(filled, /OPTIONAL CONTEXT is blank/);
 });
 
 test("empty shifts are configuration required and integrations stay stubs", () => {
@@ -213,19 +291,3 @@ test("XAI_API_KEY takes precedence over GROK_API_KEY", () => {
   else process.env.GROK_API_KEY = previousGrok;
 });
 
-function sample(overrides: Partial<AssistInput>): AssistInput {
-  return {
-    userText: "Draft a reply to the customer.",
-    customerName: "Sarah Mitchell",
-    customerMessage: "Can I book a trial?",
-    countryCode: "GB",
-    rep: "Asmaa",
-    currency: "USD",
-    program: "egyptian",
-    planId: "60x16",
-    egpRate: 52.052,
-    egpDate: "2026-09-30",
-    egpError: null,
-    ...overrides,
-  };
-}

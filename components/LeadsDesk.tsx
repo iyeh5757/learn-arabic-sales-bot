@@ -161,8 +161,8 @@ export function LeadsDesk() {
         <p className="kicker">Leads</p>
         <h1>Pipeline</h1>
         <p className="lede">
+          The pipeline starts empty. Add a customer when you learn their details. Assist can draft with a blank profile.
           A free 30-minute live trial depends on residence. Gulf countries AE, SA, KW, QA, BH, and OM stay eligible.
-          Africa and the rest of Asia do not. Lessons are private 1-to-1.
         </p>
       </header>
       {error ? <p className="error">{error}</p> : null}
@@ -226,7 +226,10 @@ export function LeadsDesk() {
       <div className="split">
         <section className="panel table-wrap">
           {loading ? <p>Loading leads…</p> : null}
-          {!loading && visible.length === 0 ? <p className="muted">No leads match these filters.</p> : null}
+          {!loading && leads.length === 0 ? (
+            <p className="muted">No leads yet. Add a customer when you learn their details. Assist works with a blank profile.</p>
+          ) : null}
+          {!loading && leads.length > 0 && visible.length === 0 ? <p className="muted">No leads match these filters.</p> : null}
           <table>
             <thead>
               <tr>

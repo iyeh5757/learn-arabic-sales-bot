@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { assistFacts, buildGrokSystem, latestUserText, respondLocally } from "@/lib/assistant";
+import { latestUserText, replyWithoutGrok } from "@/lib/assistant";
 import { getUsdToEgp } from "@/lib/frankfurter";
 import { draftWithGrok, grokCredentials } from "@/lib/grok";
-import { CATALOG, POPULAR_PLAN_ID } from "@/lib/pricing";
+import { CATALOG } from "@/lib/pricing";
+import { buildGrokSystem, type DeskContext } from "@/lib/prompt";
 import { PROGRAMS } from "@/lib/reps";
-import type { ChatTurn, Currency, PlanId, ProgramId } from "@/lib/types";
+import { executeDeskTool, type FxQuote } from "@/lib/tools";
+import type { ChatTurn } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,13 @@ const PLAN_IDS = new Set<string>(CATALOG.map((item) => item.id));
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function optionalCode(value: unknown, allowed: Set<string>, label: string): string | { error: string } {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (!allowed.has(text)) return { error: `Unknown ${label}.` };
+  return text;
 }
 
 export async function POST(request: Request) {
@@ -26,6 +35,7 @@ export async function POST(request: Request) {
     currency?: unknown;
     program?: unknown;
     planId?: unknown;
+    notes?: unknown;
   };
   try {
     body = await request.json();
@@ -47,86 +57,86 @@ export async function POST(request: Request) {
   const userText = latestUserText(turns);
   if (!userText) return bad("A message is required.");
 
-  const currency = String(body.currency ?? "USD");
-  if (!CURRENCIES.has(currency)) return bad("Unknown currency.");
-  const program = String(body.program ?? "egyptian");
-  if (!PROGRAM_IDS.has(program)) return bad("Unknown program.");
-  const planId = String(body.planId ?? POPULAR_PLAN_ID);
-  if (!PLAN_IDS.has(planId)) return bad("Unknown plan.");
+  const currency = optionalCode(body.currency, CURRENCIES, "currency");
+  if (typeof currency !== "string") return bad(currency.error);
+  const program = optionalCode(body.program, PROGRAM_IDS, "program");
+  if (typeof program !== "string") return bad(program.error);
+  const planId = optionalCode(body.planId, PLAN_IDS, "plan");
+  if (typeof planId !== "string") return bad(planId.error);
 
-  let egpRate: number | null = null;
-  let egpDate: string | null = null;
-  let egpCairoDay: string | null = null;
-  let egpError: string | null = null;
-  try {
-    const quote = await getUsdToEgp();
-    egpRate = quote.rate;
-    egpDate = quote.date;
-    egpCairoDay = quote.cairoDay;
-  } catch (error) {
-    egpError = error instanceof Error ? error.message : "Frankfurter rate unavailable.";
-  }
-
-  const input = {
-    userText,
+  const context: DeskContext = {
     customerName: String(body.customerName ?? "").slice(0, 120),
     customerMessage: String(body.customerMessage ?? "").slice(0, 8000),
-    countryCode: String(body.countryCode ?? ""),
+    countryCode: String(body.countryCode ?? "").slice(0, 8),
     rep: String(body.rep ?? "").slice(0, 40),
-    currency: currency as Currency,
-    program: program as ProgramId,
-    planId: planId as PlanId,
-    egpRate,
-    egpDate,
-    egpCairoDay,
-    egpError,
+    currency,
+    program,
+    planId,
+    notes: String(body.notes ?? "").slice(0, 4000),
   };
 
-  const facts = assistFacts(input);
-  const payload = {
-    trial: facts.trial,
-    escalation: facts.escalation,
-    priceLine: facts.priceLine,
-    egp: facts.book.egp,
-  };
-
-  const creds = grokCredentials();
-  if (creds.key) {
-    try {
-      const drafted = await draftWithGrok({
-        system: buildGrokSystem(input, facts),
-        messages: turns,
-      });
-      return NextResponse.json({
-        message: drafted.text,
-        source: "grok",
-        model: drafted.model,
-        ...payload,
-      });
-    } catch (error) {
-      const local = respondLocally(input);
-      return NextResponse.json({
-        message: local.text,
-        source: "local",
-        model: null,
-        grokError: error instanceof Error ? error.message : "Grok failed.",
-        trial: local.facts.trial,
-        escalation: local.facts.escalation,
-        priceLine: local.facts.priceLine,
-        egp: local.facts.book.egp,
-      });
-    }
+  let fx: FxQuote = null;
+  let fxError: string | null = null;
+  try {
+    const quote = await getUsdToEgp();
+    fx = { rate: quote.rate, date: quote.date, cairoDay: quote.cairoDay };
+  } catch (error) {
+    fxError = error instanceof Error ? error.message : "Frankfurter rate unavailable.";
   }
 
-  const local = respondLocally(input);
-  return NextResponse.json({
-    message: local.text,
-    source: "local",
-    model: null,
-    ...payload,
-    trial: local.facts.trial,
-    escalation: local.facts.escalation,
-    priceLine: local.facts.priceLine,
-    egp: local.facts.book.egp,
-  });
+  const creds = grokCredentials();
+  if (!creds.key) {
+    const local = replyWithoutGrok({
+      reason: "unconfigured",
+      userText,
+      customerMessage: context.customerMessage,
+      notes: context.notes,
+      countryCode: context.countryCode,
+      currency: context.currency,
+      planId: context.planId,
+      fx,
+      fxError,
+    });
+    return NextResponse.json({
+      message: local.text,
+      source: local.source,
+      model: null,
+      toolsUsed: local.toolsUsed,
+    });
+  }
+
+  try {
+    const drafted = await draftWithGrok({
+      system: buildGrokSystem(context),
+      messages: turns,
+      executeTool: (name, args) => executeDeskTool(name, args, fx, fxError),
+    });
+    return NextResponse.json({
+      message: drafted.text,
+      source: "grok",
+      model: drafted.model,
+      toolsUsed: drafted.toolsUsed,
+    });
+  } catch (error) {
+    const grokError = error instanceof Error ? error.message : "Grok failed.";
+    const local = replyWithoutGrok({
+      reason: "unavailable",
+      userText,
+      customerMessage: context.customerMessage,
+      notes: context.notes,
+      countryCode: context.countryCode,
+      currency: context.currency,
+      planId: context.planId,
+      grokError,
+      fx,
+      fxError,
+    });
+    return NextResponse.json({
+      message: local.text,
+      source: local.source,
+      model: null,
+      grokError,
+      toolsUsed: local.toolsUsed,
+    });
+  }
 }

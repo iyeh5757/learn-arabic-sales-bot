@@ -30,7 +30,9 @@ npm start
 | `FRANKFURTER_URL` | Daily USD→EGP rate. Default is Frankfurter v2. |
 | `EVOLUTION_*`, `META_*`, `GOOGLE_*`, `PAYMENTS_*` | Unused stubs. Leave empty. |
 
-Without a Grok key, Assist still answers from the local rule desk and labels the reply as a local draft.
+Set `XAI_API_KEY` on Vercel (or `GROK_API_KEY` if that is the name you use) before Assist can write a real draft. Without a key, Assist says Grok is not connected and does not invent a customer reply. If the salesperson asks for a price or a trial decision, it shows only the verified tool facts.
+
+Leads start empty. Admin has an optional **Load demo data** button. It stays off until someone clicks it. Those samples are not real customers.
 
 ## Product rules
 
@@ -92,13 +94,14 @@ Evolution API, Meta WhatsApp Cloud, Google, and payments expose stub endpoints. 
 - `/` Assist chat
 - `/leads` pipeline
 - `/admin` shifts, roster, stubs, price book
-- `POST /api/chat` Grok or local draft
+- `POST /api/chat` Grok draft using `get_pricing`, `check_trial_eligibility`, and `get_customer_currency`. Without a key, no customer draft.
 - `GET /api/pricing` price book plus the Frankfurter EGP rate
 - `GET /api/trial?country=AE` trial decision
 - `GET/POST /api/leads`, `PATCH/DELETE /api/leads/:id`
 - `GET/POST /api/shifts`, `DELETE /api/shifts/:id`
 - `POST /api/integrations/:provider` stub (`evolution`, `meta`, `google`, `payments`)
+- `POST /api/admin/demo` optional sample leads, only when an admin clicks Load demo data
 
-Lead storage is `data/desk.json`, created on the first write. Seed leads load when that file is missing. On a read-only serverless disk the desk keeps the file in memory for the life of the instance.
+Lead storage is `data/desk.json`, created on the first write. A missing file starts with an empty lead list and no shifts. On a read-only serverless disk the desk keeps the file in memory for the life of the instance.
 
 This desk has no login. Put it behind your own access control before exposing it.

@@ -1,3 +1,4 @@
+import { COUNTRIES } from "./countries";
 import type { Currency } from "./types";
 
 export const CURRENCIES: Currency[] = ["USD", "GBP", "EUR", "AED", "EGP"];
@@ -14,6 +15,13 @@ export function defaultCurrency(countryCode: string): Currency {
   if (code === "AE") return "AED";
   if (EURO.has(code)) return "EUR";
   return "USD";
+}
+
+/** List currency for a known residence. Blank or unknown stays null so the desk does not assume USD. */
+export function listCurrencyForCountry(countryCode: string): Currency | null {
+  const code = countryCode.trim().toUpperCase();
+  if (!code || !COUNTRIES[code]) return null;
+  return defaultCurrency(code);
 }
 
 export function formatMoney(amount: number, currency: Currency): string {

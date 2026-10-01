@@ -29,6 +29,8 @@ export function AdminDesk() {
   const [book, setBook] = useState<PriceBook | null>(null);
   const [error, setError] = useState("");
   const [stubOutput, setStubOutput] = useState("");
+  const [demoNote, setDemoNote] = useState("");
+  const [demoBusy, setDemoBusy] = useState(false);
   const [shift, setShift] = useState({
     rep: "Asmaa" as RepName,
     weekday: "Sunday" as Weekday,
@@ -79,6 +81,24 @@ export function AdminDesk() {
     await load();
   }
 
+  async function loadDemo() {
+    if (!window.confirm("Load sample leads? They are not real customers. The desk stays empty until you confirm.")) {
+      return;
+    }
+    setError("");
+    setDemoBusy(true);
+    try {
+      const response = await fetch("/api/admin/demo", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not load demo data.");
+      setDemoNote(data.notice || "Sample leads loaded. They are not real customers.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load demo data.");
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
   async function callStub(provider: string) {
     setError("");
     const response = await fetch(`/api/integrations/${provider}`, {
@@ -101,6 +121,19 @@ export function AdminDesk() {
         </p>
       </header>
       {error ? <p className="error">{error}</p> : null}
+      <section className="panel stack" style={{ marginBottom: 16 }}>
+        <h2>Demo data</h2>
+        <p>
+          Off by default. Leads start empty because sales do not know the customer yet.
+          Sample people are not real customers. Load them only when you want to click through the pipeline.
+        </p>
+        <div>
+          <button className="btn ghost" type="button" onClick={() => void loadDemo()} disabled={demoBusy}>
+            Load demo data
+          </button>
+        </div>
+        {demoNote ? <p className="muted">{demoNote}</p> : null}
+      </section>
       <div className="admin-grid">
         <section className="panel stack">
           <h2>Shifts</h2>
@@ -179,7 +212,7 @@ export function AdminDesk() {
             <p>
               {admin.grok.configured
                 ? `Configured via ${admin.grok.source}. Model ${admin.grok.model}.`
-                : `Not configured. Local drafts are used until XAI_API_KEY or GROK_API_KEY is set. Default model ${admin.grok.model}.`}
+                : `Not configured. Assist will not write a customer draft until XAI_API_KEY or GROK_API_KEY is set. Default model ${admin.grok.model}.`}
             </p>
           ) : (
             <p className="muted">Loading configuration…</p>

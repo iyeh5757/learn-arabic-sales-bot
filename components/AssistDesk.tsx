@@ -14,29 +14,26 @@ import { TrialBadge } from "./TrialBadge";
 type UiTurn = {
   role: "user" | "assistant";
   content: string;
-  source?: "grok" | "local";
+  source?: "grok" | "unconfigured" | "unavailable";
   model?: string | null;
   grokError?: string;
+  toolsUsed?: string[];
 };
 
-const PROMPTS = [
-  "Draft a reply to the customer.",
-  "Are they eligible for a trial lesson?",
-  "Quote the selected plan.",
-  "Who should I escalate to?",
-];
+const PROMPTS = ["Check trial eligibility", "Show package prices"];
 
 export function AssistDesk() {
   const params = useSearchParams();
   const countries = countryOptions();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [leadId, setLeadId] = useState("");
-  const [countryCode, setCountryCode] = useState("GB");
-  const [rep, setRep] = useState<RepName | "">("Asmaa");
-  const [currency, setCurrency] = useState<Currency>("GBP");
-  const [program, setProgram] = useState<ProgramId>("egyptian");
-  const [planId, setPlanId] = useState<PlanId>("60x16");
+  const [countryCode, setCountryCode] = useState("");
+  const [rep, setRep] = useState<RepName | "">("");
+  const [currency, setCurrency] = useState<Currency | "">("");
+  const [program, setProgram] = useState<ProgramId | "">("");
+  const [planId, setPlanId] = useState<PlanId | "">("");
   const [customerName, setCustomerName] = useState("");
+  const [notes, setNotes] = useState("");
   const [customerMessage, setCustomerMessage] = useState("");
   const [book, setBook] = useState<PriceBook | null>(null);
   const [turns, setTurns] = useState<UiTurn[]>([]);
@@ -64,7 +61,11 @@ export function AssistDesk() {
   }, [params]);
 
   useEffect(() => {
-    if (!leadId || applied.current === leadId) return;
+    if (!leadId) {
+      applied.current = "";
+      return;
+    }
+    if (applied.current === leadId) return;
     const lead = leads.find((item) => item.id === leadId);
     if (!lead) return;
     applied.current = leadId;
@@ -74,6 +75,7 @@ export function AssistDesk() {
     setProgram(lead.program);
     setPlanId(lead.planId);
     setCustomerName(lead.name);
+    setNotes(lead.notes);
     const lastCustomer = [...lead.messages].reverse().find((message) => message.role === "customer");
     setCustomerMessage(lastCustomer?.text ?? "");
     setTurns([]);
@@ -83,9 +85,33 @@ export function AssistDesk() {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [turns, pending]);
 
-  const escalation = detectEscalation(customerMessage);
-  const selected = book?.plans.find((plan) => plan.id === planId);
-  const amount = selected?.prices[currency];
+  const escalation = detectEscalation(`${customerMessage}\n${notes}`);
+  const selected = planId ? book?.plans.find((plan) => plan.id === planId) : undefined;
+  const amount = selected && currency ? selected.prices[currency] : undefined;
+  const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
+  const canCopy = lastAssistant?.source === "grok";
+
+  function contextBody() {
+    return {
+      customerName,
+      customerMessage,
+      countryCode,
+      rep,
+      notes,
+      ...(currency ? { currency } : {}),
+      ...(program ? { program } : {}),
+      ...(planId ? { planId } : {}),
+    };
+  }
+
+  function draftRequest(): string {
+    const paste = customerMessage.trim();
+    return [
+      "Draft a customer reply for me to copy. Do not send it.",
+      "",
+      paste ? `Customer message:\n${paste}` : "No customer message was pasted.",
+    ].join("\n");
+  }
 
   async function send(text: string) {
     const content = text.trim();
@@ -101,13 +127,7 @@ export function AssistDesk() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: nextTurns.map((turn) => ({ role: turn.role, content: turn.content })),
-          customerName,
-          customerMessage,
-          countryCode,
-          rep,
-          currency,
-          program,
-          planId,
+          ...contextBody(),
         }),
       });
       const data = await response.json();
@@ -120,6 +140,7 @@ export function AssistDesk() {
           source: data.source,
           model: data.model,
           grokError: data.grokError,
+          toolsUsed: data.toolsUsed,
         },
       ]);
     } catch (err) {
@@ -130,14 +151,13 @@ export function AssistDesk() {
   }
 
   async function saveDraft() {
-    const last = [...turns].reverse().find((turn) => turn.role === "assistant");
-    if (!leadId || !last) return;
+    if (!leadId || !canCopy || !lastAssistant) return;
     setNotice("");
     setError("");
     const response = await fetch(`/api/leads/${leadId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ appendMessage: { role: "assistant", text: last.content } }),
+      body: JSON.stringify({ appendMessage: { role: "assistant", text: lastAssistant.content } }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -148,10 +168,20 @@ export function AssistDesk() {
   }
 
   async function copyDraft() {
-    const last = [...turns].reverse().find((turn) => turn.role === "assistant");
-    if (!last) return;
-    await navigator.clipboard.writeText(last.content);
-    setNotice("Draft copied.");
+    if (!canCopy || !lastAssistant) return;
+    await navigator.clipboard.writeText(lastAssistant.content);
+    setNotice("Draft copied. It was not sent.");
+  }
+
+  function sourceLabel(turn: UiTurn): string {
+    if (turn.source === "grok") {
+      const tools = turn.toolsUsed?.length ? ` · tools ${turn.toolsUsed.join(", ")}` : "";
+      return `Drafted by Grok${turn.model ? ` · ${turn.model}` : ""}${tools}. Copy it yourself. Nothing was sent.`;
+    }
+    if (turn.source === "unavailable") {
+      return "Grok did not respond. No customer draft was written.";
+    }
+    return "Grok is not connected. No customer draft was written.";
   }
 
   return (
@@ -160,8 +190,8 @@ export function AssistDesk() {
         <p className="kicker">Assist</p>
         <h1>Draft the next reply</h1>
         <p className="lede">
-          Chat with the desk. Grok writes the draft when XAI_API_KEY or GROK_API_KEY is set.
-          Trial, list prices, and escalation stay in the answer.
+          Paste what the customer wrote. Name, country, programme, and notes stay blank until you learn them.
+          Grok drafts a reply for you to copy. Nothing is sent.
         </p>
       </header>
       <div className="assist-grid">
@@ -169,7 +199,7 @@ export function AssistDesk() {
           <div className="chat-log" ref={logRef} aria-live="polite">
             {turns.length === 0 ? (
               <p className="muted">
-                Ask for a customer draft, a trial check, or a quote. The residence country decides the trial lesson.
+                Customer context starts empty. Paste their message, then draft with Grok. Trial and prices are checked only from the tools.
               </p>
             ) : null}
             {turns.map((turn, index) => (
@@ -177,15 +207,26 @@ export function AssistDesk() {
                 {turn.content}
                 {turn.role === "assistant" ? (
                   <p className="meta">
-                    {turn.source === "grok"
-                      ? `Drafted by Grok${turn.model ? ` · ${turn.model}` : ""}`
-                      : "Local draft. Set XAI_API_KEY or GROK_API_KEY for Grok."}
+                    {sourceLabel(turn)}
                     {turn.grokError ? ` Grok error: ${turn.grokError}` : ""}
                   </p>
                 ) : null}
               </article>
             ))}
             {pending ? <p className="muted">Drafting…</p> : null}
+          </div>
+          <label className="field">
+            <span>Customer message</span>
+            <textarea
+              value={customerMessage}
+              onChange={(event) => setCustomerMessage(event.target.value)}
+              placeholder="Paste the customer's message. Leave this blank if you are only checking a fact."
+            />
+          </label>
+          <div className="row">
+            <button className="btn" type="button" onClick={() => void send(draftRequest())} disabled={pending}>
+              Draft with Grok
+            </button>
           </div>
           <div className="chips">
             {PROMPTS.map((prompt) => (
@@ -202,7 +243,7 @@ export function AssistDesk() {
             }}
           >
             <label className="field">
-              <span>Message to the desk</span>
+              <span>Note to the desk</span>
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
@@ -212,17 +253,17 @@ export function AssistDesk() {
                     void send(input);
                   }
                 }}
-                placeholder="Ask about this lead, or say “Draft a reply”."
+                placeholder="Ask Grok something about this conversation."
               />
             </label>
             <div className="row">
               <button className="btn" type="submit" disabled={pending || !input.trim()}>
                 Send
               </button>
-              <button className="btn ghost" type="button" onClick={() => void copyDraft()} disabled={!turns.some((turn) => turn.role === "assistant")}>
+              <button className="btn ghost" type="button" onClick={() => void copyDraft()} disabled={!canCopy}>
                 Copy draft
               </button>
-              <button className="btn ghost" type="button" onClick={() => void saveDraft()} disabled={!leadId || !turns.some((turn) => turn.role === "assistant")}>
+              <button className="btn ghost" type="button" onClick={() => void saveDraft()} disabled={!leadId || !canCopy}>
                 Save draft to lead
               </button>
             </div>
@@ -231,13 +272,26 @@ export function AssistDesk() {
           {notice ? <p className="muted">{notice}</p> : null}
         </section>
         <aside className="panel stack">
+          <p className="muted">Optional. Leave these blank until the customer tells you.</p>
           <label className="field">
             <span>Lead</span>
             <select
               value={leadId}
               onChange={(event) => {
+                const next = event.target.value;
                 applied.current = "";
-                setLeadId(event.target.value);
+                setLeadId(next);
+                if (!next) {
+                  setCountryCode("");
+                  setRep("");
+                  setCurrency("");
+                  setProgram("");
+                  setPlanId("");
+                  setCustomerName("");
+                  setNotes("");
+                  setCustomerMessage("");
+                  setTurns([]);
+                }
               }}
             >
               <option value="">No lead selected</option>
@@ -249,12 +303,17 @@ export function AssistDesk() {
             </select>
           </label>
           <label className="field">
-            <span>Customer name</span>
-            <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} />
+            <span>Name</span>
+            <input
+              value={customerName}
+              onChange={(event) => setCustomerName(event.target.value)}
+              placeholder="Optional"
+            />
           </label>
           <label className="field">
-            <span>Residence</span>
+            <span>Country</span>
             <select value={countryCode} onChange={(event) => setCountryCode(event.target.value)}>
+              <option value="">Not set</option>
               {countries.map((country) => (
                 <option key={country.code} value={country.code}>
                   {country.name} ({country.code})
@@ -262,12 +321,35 @@ export function AssistDesk() {
               ))}
             </select>
           </label>
-          <TrialBadge countryCode={countryCode} />
+          {countryCode ? (
+            <TrialBadge countryCode={countryCode} />
+          ) : (
+            <p className="muted">Country not set. Trial is not decided.</p>
+          )}
+          <label className="field">
+            <span>Programme</span>
+            <select value={program} onChange={(event) => setProgram(event.target.value as ProgramId | "")}>
+              <option value="">Not set</option>
+              {PROGRAMS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Notes</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Optional. Only facts you have actually learned."
+            />
+          </label>
           <div className="row">
             <label className="field grow">
               <span>Rep</span>
               <select value={rep} onChange={(event) => setRep(event.target.value as RepName | "")}>
-                <option value="">Unassigned</option>
+                <option value="">Not set</option>
                 {REPS.map((name) => (
                   <option key={name} value={name}>
                     {name}
@@ -277,7 +359,8 @@ export function AssistDesk() {
             </label>
             <label className="field grow">
               <span>Currency</span>
-              <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}>
+              <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency | "")}>
+                <option value="">Not set</option>
                 {CURRENCIES.map((code) => (
                   <option key={code} value={code}>
                     {code}
@@ -287,18 +370,9 @@ export function AssistDesk() {
             </label>
           </div>
           <label className="field">
-            <span>Program</span>
-            <select value={program} onChange={(event) => setProgram(event.target.value as ProgramId)}>
-              {PROGRAMS.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Plan</span>
-            <select value={planId} onChange={(event) => setPlanId(event.target.value as PlanId)}>
+            <span>Package</span>
+            <select value={planId} onChange={(event) => setPlanId(event.target.value as PlanId | "")}>
+              <option value="">Not set</option>
               {CATALOG.map((plan) => (
                 <option key={plan.id} value={plan.id}>
                   {plan.name}
@@ -307,15 +381,15 @@ export function AssistDesk() {
             </select>
           </label>
           <p>
-            <strong>
-              {amount == null ? `${currency} unavailable` : formatMoney(amount, currency)}
-            </strong>
-            <span className="muted"> · {selected?.name ?? "Plan"}</span>
+            {selected && currency ? (
+              <>
+                <strong>{amount == null ? `${currency} unavailable` : formatMoney(amount, currency)}</strong>
+                <span className="muted"> · {selected.name}</span>
+              </>
+            ) : (
+              <span className="muted">No package selected.</span>
+            )}
           </p>
-          <label className="field">
-            <span>Latest customer message</span>
-            <textarea value={customerMessage} onChange={(event) => setCustomerMessage(event.target.value)} />
-          </label>
           {escalation.required ? (
             <p className="error">
               Escalation: {escalation.reasons.join(", ")}. Hand off to {ESCALATION.name} on {ESCALATION.phone}.

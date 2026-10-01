@@ -42,8 +42,34 @@ const CHANNELS = new Set(["whatsapp", "email", "site", "other"]);
 const WEEKDAY_SET = new Set(WEEKDAYS);
 const TZ_SET = new Set(TIMEZONES);
 
+export function freshDesk(): DeskData {
+  return { leads: [], shifts: [] };
+}
+
 function emptyDesk(): DeskData {
-  return { leads: seedLeads(), shifts: [] };
+  return freshDesk();
+}
+
+export function mergeDemoLeads(leads: Lead[]): { leads: Lead[]; added: number } {
+  const ids = new Set(leads.map((lead) => lead.id));
+  const next = leads.map((lead) => structuredClone(lead));
+  let added = 0;
+  for (const lead of seedLeads()) {
+    if (ids.has(lead.id)) continue;
+    next.push(lead);
+    added += 1;
+  }
+  return { leads: next, added };
+}
+
+export async function loadDemoLeads(): Promise<{ added: number; leads: Lead[] }> {
+  let added = 0;
+  const data = await updateDesk((desk) => {
+    const merged = mergeDemoLeads(desk.leads);
+    desk.leads = merged.leads;
+    added = merged.added;
+  });
+  return { added, leads: structuredClone(data.leads) };
 }
 
 async function load(): Promise<DeskData> {
