@@ -154,7 +154,7 @@ h2 { font-size: 28px; }
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   padding-bottom: 8px;
 }
 
@@ -169,6 +169,73 @@ h2 { font-size: 28px; }
 .bubble.assistant { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .meta { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .bubble.user .meta { color: #d5e0db; }
+
+.draft-result {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.draft-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 8px 8px 20px 20px;
+  box-shadow: var(--shadow);
+}
+
+.draft-card-head,
+.rep-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.draft-card-head .kicker { margin: 0; }
+
+.draft-body {
+  margin-top: 8px;
+  font-size: 1.125rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  padding-right: 12px;
+}
+
+.rep-note {
+  background: var(--gold-soft);
+  border: 1px solid #e3d0a2;
+  border-left: 4px solid var(--gold);
+  color: #5c4314;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.rep-note-kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8d6a2f;
+}
+
+.rep-note p:last-child {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+
+.rep-note .btn.ghost {
+  background: transparent;
+  color: #5c4314;
+  border-color: #e3d0a2;
+  padding: 6px 10px;
+}
 
 .composer, .stack, .filters { display: flex; flex-direction: column; gap: 10px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

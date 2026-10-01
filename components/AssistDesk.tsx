@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { countryOptions } from "@/lib/countries";
 import { detectEscalation } from "@/lib/escalate";
+import { presentReply } from "@/lib/firstReply";
 import { CURRENCIES, formatMoney } from "@/lib/money";
 import type { PriceBook } from "@/lib/pricing";
 import { CATALOG } from "@/lib/pricing";
@@ -18,7 +19,27 @@ type UiTurn = {
   model?: string | null;
   grokError?: string;
   toolsUsed?: string[];
+  retryable?: boolean;
 };
+
+const DRAFT_CLIENT_TIMEOUT_MS = 190_000;
+
+function visibleUserText(content: string): string {
+  if (!content.startsWith("Draft a short WhatsApp reply")) return content;
+  const pasted = content.split("Customer message:\n")[1]?.trim() ?? "";
+  if (!pasted || pasted.startsWith("No customer message")) return "Draft a reply";
+  return `Draft a reply\n\n${pasted}`;
+}
+
+function timeoutMessage(error: unknown): string | null {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "The draft took too long. Nothing was sent. Try again.";
+  }
+  if (error instanceof Error && /too long|timeout|timed out|aborted/i.test(error.message)) {
+    return "The draft took too long. Nothing was sent. Try again.";
+  }
+  return null;
+}
 
 const PROMPTS = [
   {
@@ -30,6 +51,63 @@ const PROMPTS = [
     text: "Internal note only for me, not a customer draft. Show the package prices in the note to the salesperson. Do not write prices into a customer message.",
   },
 ];
+
+function AssistantDraft({
+  turn,
+  footer,
+  onCopyDraft,
+  onCopyNote,
+}: {
+  turn: UiTurn;
+  footer: string;
+  onCopyDraft: (text: string) => void;
+  onCopyNote: (text: string) => void;
+}) {
+  const presented = presentReply(turn.content);
+  const structured = turn.source === "grok" && (presented.hasDraftHeading || presented.showNote);
+  if (!structured) {
+    return (
+      <article className="bubble assistant">
+        {turn.content}
+        <p className="meta">
+          {footer}
+          {turn.grokError ? ` Grok error: ${turn.grokError}` : ""}
+        </p>
+      </article>
+    );
+  }
+
+  return (
+    <article className="draft-result">
+      {presented.draft ? (
+        <div className="draft-card">
+          <div className="draft-card-head">
+            <p className="kicker">Draft to copy</p>
+            <button className="btn" type="button" onClick={() => onCopyDraft(presented.draft)}>
+              Copy draft
+            </button>
+          </div>
+          <div className="draft-body">{presented.draft}</div>
+        </div>
+      ) : null}
+      {presented.showNote ? (
+        <aside className="rep-note" aria-label="Internal note for the salesperson">
+          <div className="rep-note-head">
+            <p className="rep-note-kicker">Internal only · not for the customer</p>
+            <button className="btn ghost" type="button" onClick={() => onCopyNote(presented.note)}>
+              Copy note
+            </button>
+          </div>
+          <p>{presented.note}</p>
+        </aside>
+      ) : null}
+      <p className="meta">
+        {footer}
+        {turn.grokError ? ` Grok error: ${turn.grokError}` : ""}
+      </p>
+    </article>
+  );
+}
 
 export function AssistDesk() {
   const params = useSearchParams();
@@ -98,7 +176,9 @@ export function AssistDesk() {
   const selected = planId ? book?.plans.find((plan) => plan.id === planId) : undefined;
   const amount = selected && currency ? selected.prices[currency] : undefined;
   const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
-  const canCopy = lastAssistant?.source === "grok";
+  const lastCopyText =
+    lastAssistant?.source === "grok" ? presentReply(lastAssistant.content).copyText : "";
+  const canCopy = Boolean(lastCopyText);
 
   function contextBody() {
     return {
@@ -131,6 +211,8 @@ export function AssistDesk() {
     setInput("");
     setPending(true);
     setError("");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DRAFT_CLIENT_TIMEOUT_MS);
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -139,23 +221,41 @@ export function AssistDesk() {
           messages: nextTurns.map((turn) => ({ role: turn.role, content: turn.content })),
           ...contextBody(),
         }),
+        signal: controller.signal,
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Draft failed.");
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+        source?: UiTurn["source"];
+        model?: string | null;
+        grokError?: string;
+        toolsUsed?: string[];
+        retryable?: boolean;
+      } | null;
+      const platformTimeout = response.status === 502 || response.status === 504;
+      if (!response.ok || !data?.message) {
+        throw new Error(
+          data?.retryable || platformTimeout
+            ? "The draft took too long. Nothing was sent. Try again."
+            : data?.error || "Draft failed. Try again.",
+        );
+      }
       setTurns((current) => [
         ...current,
         {
           role: "assistant",
-          content: data.message,
+          content: data.message ?? "",
           source: data.source,
           model: data.model,
           grokError: data.grokError,
           toolsUsed: data.toolsUsed,
+          retryable: data.retryable,
         },
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Draft failed.");
+      setError(timeoutMessage(err) ?? (err instanceof Error ? err.message : "Draft failed. Try again."));
     } finally {
+      clearTimeout(timer);
       setPending(false);
     }
   }
@@ -167,7 +267,7 @@ export function AssistDesk() {
     const response = await fetch(`/api/leads/${leadId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ appendMessage: { role: "assistant", text: lastAssistant.content } }),
+      body: JSON.stringify({ appendMessage: { role: "assistant", text: lastCopyText } }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -177,10 +277,15 @@ export function AssistDesk() {
     setNotice("Draft saved on the lead.");
   }
 
-  async function copyDraft() {
-    if (!canCopy || !lastAssistant) return;
-    await navigator.clipboard.writeText(lastAssistant.content);
-    setNotice("Draft copied. It was not sent.");
+  async function copyText(text: string, message: string) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setError("");
+      setNotice(message);
+    } catch {
+      setError("Could not copy. Select the draft and copy it manually.");
+    }
   }
 
   function sourceLabel(turn: UiTurn): string {
@@ -189,7 +294,9 @@ export function AssistDesk() {
       return `Drafted by Grok${turn.model ? ` · ${turn.model}` : ""}${tools}. Copy it yourself. Nothing was sent.`;
     }
     if (turn.source === "unavailable") {
-      return "Grok did not respond. No customer draft was written.";
+      return turn.retryable
+        ? "Nothing was sent. Try the draft again."
+        : "Grok did not respond. No customer draft was written.";
     }
     return "Grok is not connected. No customer draft was written.";
   }
@@ -212,18 +319,22 @@ export function AssistDesk() {
                 Customer context starts empty. Paste their message, then draft with Grok. The first reply should not open with a trial or a price list.
               </p>
             ) : null}
-            {turns.map((turn, index) => (
-              <article key={`${turn.role}-${index}`} className={`bubble ${turn.role}`}>
-                {turn.content}
-                {turn.role === "assistant" ? (
-                  <p className="meta">
-                    {sourceLabel(turn)}
-                    {turn.grokError ? ` Grok error: ${turn.grokError}` : ""}
-                  </p>
-                ) : null}
-              </article>
-            ))}
-            {pending ? <p className="muted">Drafting…</p> : null}
+            {turns.map((turn, index) =>
+              turn.role === "assistant" ? (
+                <AssistantDraft
+                  key={`${turn.role}-${index}`}
+                  turn={turn}
+                  footer={sourceLabel(turn)}
+                  onCopyDraft={(text) => void copyText(text, "Draft copied. It was not sent.")}
+                  onCopyNote={(text) => void copyText(text, "Internal note copied. It was not sent.")}
+                />
+              ) : (
+                <article key={`${turn.role}-${index}`} className="bubble user">
+                  {visibleUserText(turn.content)}
+                </article>
+              ),
+            )}
+            {pending ? <p className="muted">Drafting… this can take a minute.</p> : null}
           </div>
           <label className="field">
             <span>Customer message</span>
@@ -270,7 +381,7 @@ export function AssistDesk() {
               <button className="btn" type="submit" disabled={pending || !input.trim()}>
                 Send
               </button>
-              <button className="btn ghost" type="button" onClick={() => void copyDraft()} disabled={!canCopy}>
+              <button className="btn ghost" type="button" onClick={() => void copyText(lastCopyText, "Draft copied. It was not sent.")} disabled={!canCopy}>
                 Copy draft
               </button>
               <button className="btn ghost" type="button" onClick={() => void saveDraft()} disabled={!leadId || !canCopy}>

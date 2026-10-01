@@ -68,12 +68,69 @@ export function discoveryDraft(input: {
 }
 
 export function splitReply(reply: string): { note: string; draft: string; hasDraftHeading: boolean } {
-  const marked = reply.match(/([\s\S]*?)Draft to copy\s*([\s\S]*)$/i);
-  if (marked) {
-    const note = marked[1].replace(/^\s*Note to the salesperson\s*/i, "").trim();
-    return { note, draft: marked[2].trim(), hasDraftHeading: true };
+  const hasDraft = /Draft to copy/i.test(reply);
+  const hasNote = /Note to the salesperson/i.test(reply);
+  if (!hasDraft && !hasNote) {
+    return { note: "", draft: reply.trim(), hasDraftHeading: false };
   }
-  return { note: "", draft: reply.trim(), hasDraftHeading: false };
+
+  const draft = hasDraft
+    ? (reply.match(/Draft to copy\s*([\s\S]*?)(?=\n+\s*Note to the salesperson\b|$)/i)?.[1] ?? "").trim()
+    : "";
+  const note = hasNote
+    ? (reply.match(/Note to the salesperson\s*([\s\S]*?)(?=\n+\s*Draft to copy\b|$)/i)?.[1] ?? "").trim()
+    : "";
+
+  if (!hasDraft) return { note, draft: "", hasDraftHeading: false };
+  return { note, draft, hasDraftHeading: true };
+}
+
+const EMPTY_NOTE =
+  /^(?:none|n\/a|nothing(?: to add)?|no note(?: needed)?|not needed|no salesperson note|—|-|\.)\.?$/i;
+
+/** A note the rep must see. Routine "eligible / did not call a tool" status is not one of these. */
+const KEEP_NOTE =
+  /not eligible|ineligible|unavailable|escalat|hand (?:it |this )?off|\+201093570811|contradict|refund|discount|complaint|chargeback|unknown country|country is (?:blank|unknown|missing)|do not offer|mismatch|gulf exception|eligible even though/i;
+
+/** Status dumps that restate the default discovery rules. */
+const ROUTINE_NOTE =
+  /\beligib|did not call|does not need|do not mention the trial|still unknown|checked check_trial|no note\b/i;
+
+export function noteWorthShowing(note: string): boolean {
+  const text = note.replace(/\s+/g, " ").trim();
+  if (!text || EMPTY_NOTE.test(text)) return false;
+  if (KEEP_NOTE.test(text)) return true;
+  if (ROUTINE_NOTE.test(text)) return false;
+  return true;
+}
+
+export function presentReply(reply: string): {
+  note: string;
+  draft: string;
+  showNote: boolean;
+  copyText: string;
+  hasDraftHeading: boolean;
+} {
+  const split = splitReply(reply);
+  const draft = split.hasDraftHeading ? split.draft : "";
+  // A draft makes a routine status note redundant. A note-only reply is the answer the rep asked for.
+  const showNote = draft ? noteWorthShowing(split.note) : Boolean(split.note.trim());
+  const copyText = draft ? draft : showNote ? "" : reply.trim();
+  return {
+    note: showNote ? split.note.trim() : "",
+    draft,
+    showNote,
+    copyText,
+    hasDraftHeading: split.hasDraftHeading,
+  };
+}
+
+/** Drop a routine status note before the next model turn so it is not copied forward. */
+export function replyForModel(content: string): string {
+  const presented = presentReply(content);
+  if (!presented.hasDraftHeading) return content.trim();
+  if (!presented.showNote) return `Draft to copy\n${presented.draft}`;
+  return `Draft to copy\n${presented.draft}\n\nNote to the salesperson\n${presented.note}`;
 }
 
 export function holdsCommercialPitch(input: {
