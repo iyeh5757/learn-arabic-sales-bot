@@ -23,6 +23,26 @@ export function discoveryDone(...parts: Array<string | undefined>): boolean {
   return DISCOVERY_DONE.test(parts.filter(Boolean).join("\n"));
 }
 
+const SLOT_GOAL =
+  /\b(goal|family|in-laws|in laws|travel(?:ling|ing)?|for work|my job|quran|qur['’]an|business|kids|children|wife|husband|spouse)\b/i;
+const SLOT_LEVEL =
+  /\b(beginners?|intermediate|advanced|from the beginning|already know|some arabic|no arabic|don'?t know|zero arabic)\b/i;
+const SLOT_SCHEDULE = /\b(w+e+k+e+nds?|weekdays?|evenings?|mornings?|afternoons?|schedule)\b/i;
+
+/** Goal, level, and schedule all show up in the customer's own words or the rep's notes. */
+export function discoverySlotsLookFilled(...parts: Array<string | undefined>): boolean {
+  const text = parts.filter(Boolean).join("\n");
+  return SLOT_GOAL.test(text) && SLOT_LEVEL.test(text) && SLOT_SCHEDULE.test(text);
+}
+
+/** Pull the customer's words out of a desk turn. Desk questions contribute nothing. */
+export function customerUtterance(text: string): string {
+  const marked = text.match(/Customer just said:\s*([\s\S]*)$/i);
+  if (marked) return marked[1].trim();
+  if (/^\s*(Desk question only|Internal note only)\b/i.test(text)) return "";
+  return text.trim();
+}
+
 /** Reasons a customer-facing first draft jumped ahead of discovery. */
 export function firstDraftViolations(draft: string): string[] {
   const reasons: string[] = [];
@@ -161,7 +181,14 @@ export function applyFirstReplyGuard(input: {
   const split = splitReply(input.reply);
   const internalOnly =
     !split.hasDraftHeading && /\binternal note only\b|\brep note\b/i.test(input.userText ?? "");
-  const violations = firstDraftViolations(split.draft);
+  const slotsFilled = discoverySlotsLookFilled(
+    input.customerMessage,
+    input.notes,
+    customerUtterance(input.userText ?? ""),
+  );
+  const violations = firstDraftViolations(split.draft).filter(
+    (reason) => !(slotsFilled && reason === "trial pitch"),
+  );
   if (!holdsCommercialPitch(input) || violations.length === 0 || internalOnly) {
     return {
       text: input.reply,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { latestUserText, replyWithoutGrok } from "@/lib/assistant";
-import { applyFirstReplyGuard, replyForModel } from "@/lib/firstReply";
+import { applyFirstReplyGuard, customerUtterance, discoverySlotsLookFilled, replyForModel } from "@/lib/firstReply";
 import { getUsdToEgp } from "@/lib/frankfurter";
 import { draftWithGrok, grokCredentials, isDraftTimeout } from "@/lib/grok";
 import { CATALOG } from "@/lib/pricing";
@@ -80,10 +80,22 @@ export async function POST(request: Request) {
     followUp: turns.some((turn) => turn.role === "assistant" && /Draft to copy/i.test(turn.content)),
   };
 
+  const history = turns
+    .slice(0, -1)
+    .map((turn) => (turn.role === "user" ? customerUtterance(turn.content) : turn.content))
+    .filter(Boolean)
+    .join("\n");
+  context.slotsFilled = discoverySlotsLookFilled(
+    context.customerMessage,
+    context.notes,
+    history,
+    customerUtterance(userText),
+  );
   const toolList = selectDeskTools({
     userText,
     customerMessage: context.customerMessage,
     notes: context.notes,
+    history,
   });
   context.enabledTools = toolList.map((tool) => tool.function.name);
 

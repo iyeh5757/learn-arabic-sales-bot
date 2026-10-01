@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { replyWithoutGrok } from "../lib/assistant";
-import { applyFirstReplyGuard, firstDraftViolations, noteWorthShowing, presentReply, replyForModel, splitReply } from "../lib/firstReply";
+import { applyFirstReplyGuard, customerUtterance, discoverySlotsLookFilled, firstDraftViolations, noteWorthShowing, presentReply, replyForModel, splitReply } from "../lib/firstReply";
 import { COUNTRIES } from "../lib/countries";
 import { stubResult } from "../lib/integrations";
 import { cairoCalendarDay, clearFxCache, getUsdToEgp, parseFrankfurter } from "../lib/frankfurter";
@@ -316,6 +316,25 @@ test("Grok prompt carries the production rules and stays blank without context",
   assert.match(follow, /THIS IS A FOLLOW-UP/);
   assert.match(follow, /still missing/);
   assert.doesNotMatch(follow, /THIS MESSAGE IS EARLY/);
+  assert.doesNotMatch(follow, /DISCOVERY SLOTS ARE FILLED/);
+  assert.ok(follow.lastIndexOf("VOICE —") > follow.lastIndexOf("TOOLS THIS TURN"));
+  assert.match(follow, /Weekends — noted, Adam/);
+  assert.match(follow, /Weekends works, Adam/);
+  assert.match(follow, /Sign this draft with Kamal/);
+
+  const unsigned = buildGrokSystem({
+    customerName: "Adam",
+    customerMessage: "weekends",
+    notes: "Complete beginner. Goal is family.",
+    followUp: true,
+    enabledTools: ["check_trial_eligibility"],
+  });
+  assert.match(unsigned, /DISCOVERY SLOTS ARE FILLED/);
+  assert.match(unsigned, /do not summarize/i);
+  assert.match(unsigned, /No rep is selected/);
+  assert.match(unsigned, /Do not write Learn Arabic Academy as a signature/);
+  assert.doesNotMatch(unsigned, /THIS IS A FOLLOW-UP/);
+  assert.ok(unsigned.endsWith("Do not write Learn Arabic Academy as a signature."));
 });
 
 test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
@@ -400,6 +419,26 @@ test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
   });
   assert.equal(priceAsk.rewritten, false);
   assert.match(priceAsk.customerDraft, /£128/);
+
+  const nextStep = applyFirstReplyGuard({
+    reply: "Draft to copy\nWeekends works, Adam. Want to try a free 30-minute lesson with a teacher?\nKamal",
+    customerMessage: "weekends",
+    notes: "Complete beginner. Goal is family.",
+    customerName: "Adam",
+    rep: "Kamal",
+  });
+  assert.equal(nextStep.rewritten, false);
+  assert.match(nextStep.customerDraft, /30-minute/);
+
+  const priced = applyFirstReplyGuard({
+    reply: "Draft to copy\nThe 16 × 60-minute package is £128.",
+    customerMessage: "weekends",
+    notes: "Complete beginner. Goal is family.",
+    customerName: "Adam",
+    rep: "Kamal",
+  });
+  assert.equal(priced.rewritten, true);
+  assert.doesNotMatch(priced.customerDraft, /£128/);
 });
 
 test("a discovery draft drops routine notes and keeps the customer text", () => {
@@ -484,6 +523,27 @@ test("discovery turns do not receive trial or price tools", () => {
     notes: "discovery is done",
   }).map((tool) => tool.function.name);
   assert.deepEqual(ready, ["get_pricing", "check_trial_eligibility", "get_customer_currency"]);
+
+  const closing = selectDeskTools({
+    userText: "The customer just said this. Write the next WhatsApp reply.\n\nCustomer just said:\nweeekends",
+    customerMessage: "weeekends",
+    notes: "Complete beginner. Goal is family.",
+  }).map((tool) => tool.function.name);
+  assert.deepEqual(closing, ["check_trial_eligibility"]);
+
+  const deskAsk = selectDeskTools({
+    userText: "Desk question only. This is not the customer speaking. Do not add it to their goal, level, or schedule.\n\nWho is on shift?",
+    customerMessage: "hey i want to start online sessions",
+  }).map((tool) => tool.function.name);
+  assert.deepEqual(deskAsk, []);
+  assert.equal(
+    customerUtterance(
+      "Desk question only. This is not the customer speaking. Do not add it to their goal, level, or schedule.\n\nWho is on shift?",
+    ),
+    "",
+  );
+  assert.equal(discoverySlotsLookFilled("weeekends", "Complete beginner. Goal is family."), true);
+  assert.equal(discoverySlotsLookFilled("family"), false);
 });
 
 test("draft timeouts are retryable and longer than the old 30 second abort", () => {
