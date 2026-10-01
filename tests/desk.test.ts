@@ -6,7 +6,7 @@ import { COUNTRIES } from "../lib/countries";
 import { stubResult } from "../lib/integrations";
 import { cairoCalendarDay, clearFxCache, getUsdToEgp, parseFrankfurter } from "../lib/frankfurter";
 import { buildPriceBook, CATALOG, egpFromUsd, EGP_FORMULA } from "../lib/pricing";
-import { buildGrokSystem } from "../lib/prompt";
+import { buildGrokSystem, MASTER_PROMPT, readMasterOperatingSpec } from "../lib/prompt";
 import { CONFIGURATION_REQUIRED, shiftsStatus } from "../lib/reps";
 import { freshDesk, mergeDemoLeads } from "../lib/store";
 import { seedLeads } from "../lib/seed";
@@ -335,6 +335,45 @@ test("Grok prompt carries the production rules and stays blank without context",
   assert.match(unsigned, /Do not write Learn Arabic Academy as a signature/);
   assert.doesNotMatch(unsigned, /THIS IS A FOLLOW-UP/);
   assert.ok(unsigned.endsWith("Do not write Learn Arabic Academy as a signature."));
+});
+
+test("owner master spec is the draft brain and section 16 matches the catalogue", () => {
+  const spec = readMasterOperatingSpec();
+  assert.equal(spec, MASTER_PROMPT);
+  assert.doesNotMatch(spec, /full operating specification is missing/);
+  assert.match(spec, /MASTER AI SALES & CUSTOMER OPERATIONS AGENT/);
+  assert.match(spec, /136\. ABSOLUTE FINAL RULE/);
+  assert.match(spec, /END OF MASTER INSTRUCTION/);
+  assert.match(spec, /https:\/\/www\.learnarabic08\.com\//);
+  assert.match(spec, /CREATIVE WITH LANGUAGE/);
+  assert.match(spec, /ASK ONE MAIN QUESTION AT A TIME/);
+
+  const prompt = buildGrokSystem({});
+  assert.ok(prompt.includes(spec));
+  assert.ok(prompt.indexOf("END OF MASTER INSTRUCTION") < prompt.indexOf("MODE A — THIS DESK"));
+  assert.ok(prompt.indexOf("MODE A — THIS DESK") < prompt.lastIndexOf("VOICE —"));
+  assert.match(prompt, /get_pricing is the configured pricing backend/);
+  assert.match(prompt, /check_trial_eligibility is the configured trial-location backend/);
+  assert.match(prompt, /Do not copy a price out of the master/);
+  assert.match(prompt, /no book or pay tools/i);
+  assert.match(prompt, /If EGP is null or the tool is unavailable/);
+
+  const sixty = spec.split("30-MINUTE PACKAGES:")[0].split("60-MINUTE PACKAGES:")[1];
+  const thirty = spec.split("30-MINUTE PACKAGES:")[1].split("EGP PRICING:")[0];
+  assert.ok(sixty && thirty);
+  for (const plan of CATALOG) {
+    const block = plan.minutes === 60 ? sixty : thirty;
+    const chunk = block.split(`${plan.sessions} sessions:`)[1]?.split(/^\d+ sessions:/m)[0] ?? "";
+    assert.match(chunk, new RegExp(`USD ${plan.usd}\\b`));
+    assert.match(chunk, new RegExp(`GBP ${plan.gbp}\\b`));
+    assert.match(chunk, new RegExp(`EUR ${plan.eur}\\b`));
+    assert.match(chunk, new RegExp(`AED ${plan.aed}\\b`));
+  }
+  assert.match(spec, /EGP PRICING:[\s\S]{0,200}NOT CONFIGURED/);
+  assert.deepEqual(
+    CATALOG.filter((plan) => plan.popular).map((plan) => plan.id),
+    ["60x16"],
+  );
 });
 
 test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
