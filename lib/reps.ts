@@ -9,12 +9,11 @@ export const ESCALATION = {
 } as const;
 
 export const PROGRAMS: { id: ProgramId; label: string }[] = [
-  { id: "egyptian", label: "Egyptian Arabic" },
-  { id: "msa", label: "Modern Standard Arabic" },
-  { id: "quranic", label: "Quranic Arabic" },
-  { id: "gulf", label: "Gulf Arabic" },
-  { id: "levantine", label: "Levantine Arabic" },
-  { id: "unsure", label: "Not sure yet" },
+  { id: "egyptian", label: "Egyptian" },
+  { id: "levantine", label: "Levantine" },
+  { id: "gulf", label: "Gulf/Khaliji" },
+  { id: "msa", label: "MSA" },
+  { id: "quran", label: "Quran" },
 ];
 
 export const STAGES: { id: Stage; label: string }[] = [

@@ -35,7 +35,7 @@ export function AssistDesk() {
   const [rep, setRep] = useState<RepName | "">("Asmaa");
   const [currency, setCurrency] = useState<Currency>("GBP");
   const [program, setProgram] = useState<ProgramId>("egyptian");
-  const [planId, setPlanId] = useState<PlanId>("private-30");
+  const [planId, setPlanId] = useState<PlanId>("60x16");
   const [customerName, setCustomerName] = useState("");
   const [customerMessage, setCustomerMessage] = useState("");
   const [book, setBook] = useState<PriceBook | null>(null);

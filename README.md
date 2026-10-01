@@ -34,32 +34,45 @@ Without a Grok key, Assist still answers from the local rule desk and labels the
 
 ## Product rules
 
-### Trial lesson
+### Trial
 
-A live trial lesson is offered when residence is **not** in Africa or Asia.
+A free 30-minute live trial is offered when residence is outside Africa and Asia.
 
 Gulf countries stay eligible even though they are in Asia:
 
 `AE` United Arab Emirates, `SA` Saudi Arabia, `KW` Kuwait, `QA` Qatar, `BH` Bahrain, `OM` Oman.
 
-The free 10-minute level quiz on [learnarabic08.com](https://www.learnarabic08.com/) is separate and is not blocked by residence. Continents follow UN M49 (Russia in Europe; Turkey, Cyprus, the Caucasus, and Kazakhstan in Asia).
+Continents follow UN M49 (Russia in Europe; Turkey, Cyprus, the Caucasus, and Kazakhstan in Asia). Trial stages (`trial offered`, `trial booked`) are rejected when the residence is not eligible.
 
-Trial stages (`trial offered`, `trial booked`) are rejected when the residence is not eligible.
+### Programmes
+
+Egyptian, Levantine, Gulf/Khaliji, MSA, and Quran. Lessons are private 1-to-1. The desk does not quote group classes.
 
 ### Pricing
 
-| Plan | USD | GBP | EUR | AED |
+60-minute private packages. 16 sessions is the most popular.
+
+| Sessions | USD | GBP | EUR | AED |
 | --- | ---: | ---: | ---: | ---: |
-| Private 30-minute session | 22 | 17 | 20 | 80.80 |
-| Private 60-minute session | 48 | 36 | 44 | 176.28 |
-| Group class | 15 | 12 | 14 | 55.09 |
-| Starter month (4 × 30 min) | 88 | 68 | 80 | 323.18 |
-| Standard month (8 × 30 min) | 176 | 136 | 160 | 646.36 |
-| Intensive month (12 × 30 min) | 264 | 204 | 240 | 969.54 |
+| 4 | 48 | 44 | 44 | 176 |
+| 8 | 88 | 80 | 80 | 323 |
+| 12 | 120 | 108 | 108 | 441 |
+| 16 | 144 | 128 | 128 | 529 |
+| 20 | 160 | 140 | 140 | 587 |
 
-USD amounts follow the public floors on the signup site (private 30 minutes from $22, private 60 minutes from $48, group from $15). Monthly plans are the 30-minute list price times 4, 8, or 12. GBP and EUR are fixed list prices. AED is USD × 3.6725.
+30-minute private packages.
 
-**EGP = USD × the daily Frankfurter rate.** Frankfurter v1 (ECB) does not list EGP. The desk calls Frankfurter v2 (`/v2/rates?base=USD&quotes=EGP`) and does not invent a rate if that call fails. Recorded courses and books are not in this price book.
+| Sessions | USD | GBP | EUR | AED |
+| --- | ---: | ---: | ---: | ---: |
+| 4 | 28 | 28 | 28 | 103 |
+| 8 | 52 | 52 | 52 | 191 |
+| 12 | 72 | 72 | 72 | 264 |
+| 16 | 88 | 88 | 88 | 323 |
+| 20 | 100 | 100 | 100 | 367 |
+
+USD, GBP, EUR, and AED are fixed list prices. AED is not calculated from a peg or a live rate.
+
+**EGP = the USD package price × today’s Frankfurter USD→EGP mid rate.** The rate is cached for the Africa/Cairo calendar day. Frankfurter v1 (ECB) does not list EGP, so the desk calls Frankfurter v2 (`/v2/rates?base=USD&quotes=EGP`). If that call fails, EGP stays blank.
 
 Reps do not invent discounts. Pricing exceptions go to escalation.
 

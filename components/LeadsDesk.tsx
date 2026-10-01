@@ -20,7 +20,7 @@ const blank = {
   countryCode: "GB",
   channel: "whatsapp" as Channel,
   program: "egyptian" as ProgramId,
-  planId: "private-30" as PlanId,
+  planId: "60x16" as PlanId,
   stage: "new" as Stage,
   rep: "" as RepName | "",
   currency: "GBP" as Currency,
@@ -161,8 +161,8 @@ export function LeadsDesk() {
         <p className="kicker">Leads</p>
         <h1>Pipeline</h1>
         <p className="lede">
-          Residence decides the trial lesson. Gulf countries AE, SA, KW, QA, BH, and OM stay eligible.
-          Africa and the rest of Asia do not.
+          A free 30-minute live trial depends on residence. Gulf countries AE, SA, KW, QA, BH, and OM stay eligible.
+          Africa and the rest of Asia do not. Lessons are private 1-to-1.
         </p>
       </header>
       {error ? <p className="error">{error}</p> : null}

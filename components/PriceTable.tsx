@@ -21,6 +21,7 @@ export function PriceTable({ book }: { book: PriceBook }) {
             <tr key={plan.id}>
               <td>
                 <strong>{plan.name}</strong>
+                {plan.popular ? <span className="badge gulf">Most popular</span> : null}
                 <div className="muted">{plan.detail}</div>
               </td>
               {COLUMNS.map((currency) => {
@@ -34,9 +35,9 @@ export function PriceTable({ book }: { book: PriceBook }) {
       <p className="muted">
         {book.egp.formula}
         {book.egp.rate != null
-          ? ` 1 USD = ${book.egp.rate} EGP on ${book.egp.date}.`
-          : ` ${book.egp.error ?? "The daily rate is unavailable."}`}
-        {" "}GBP, EUR, and AED stay on the list. AED uses the 3.6725 dirham peg.
+          ? ` 1 USD = ${book.egp.rate} EGP on ${book.egp.date}${book.egp.cairoDay ? `, cached for Cairo day ${book.egp.cairoDay}` : ""}.`
+          : ` ${book.egp.error ?? "The daily rate is unavailable, so EGP is not shown."}`}
+        {" "}USD, GBP, EUR, and AED are fixed list prices. AED is not derived from a rate.
       </p>
     </div>
   );

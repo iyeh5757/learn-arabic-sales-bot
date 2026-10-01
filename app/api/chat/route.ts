@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { assistFacts, buildGrokSystem, latestUserText, respondLocally } from "@/lib/assistant";
 import { getUsdToEgp } from "@/lib/frankfurter";
 import { draftWithGrok, grokCredentials } from "@/lib/grok";
+import { CATALOG, POPULAR_PLAN_ID } from "@/lib/pricing";
+import { PROGRAMS } from "@/lib/reps";
 import type { ChatTurn, Currency, PlanId, ProgramId } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 const CURRENCIES = new Set(["USD", "GBP", "EUR", "AED", "EGP"]);
-const PROGRAMS = new Set(["egyptian", "msa", "quranic", "gulf", "levantine", "unsure"]);
-const PLANS = new Set(["private-30", "private-60", "group", "starter", "standard", "intensive"]);
+const PROGRAM_IDS = new Set<string>(PROGRAMS.map((item) => item.id));
+const PLAN_IDS = new Set<string>(CATALOG.map((item) => item.id));
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -47,18 +49,20 @@ export async function POST(request: Request) {
 
   const currency = String(body.currency ?? "USD");
   if (!CURRENCIES.has(currency)) return bad("Unknown currency.");
-  const program = String(body.program ?? "unsure");
-  if (!PROGRAMS.has(program)) return bad("Unknown program.");
-  const planId = String(body.planId ?? "private-30");
-  if (!PLANS.has(planId)) return bad("Unknown plan.");
+  const program = String(body.program ?? "egyptian");
+  if (!PROGRAM_IDS.has(program)) return bad("Unknown program.");
+  const planId = String(body.planId ?? POPULAR_PLAN_ID);
+  if (!PLAN_IDS.has(planId)) return bad("Unknown plan.");
 
   let egpRate: number | null = null;
   let egpDate: string | null = null;
+  let egpCairoDay: string | null = null;
   let egpError: string | null = null;
   try {
     const quote = await getUsdToEgp();
     egpRate = quote.rate;
     egpDate = quote.date;
+    egpCairoDay = quote.cairoDay;
   } catch (error) {
     egpError = error instanceof Error ? error.message : "Frankfurter rate unavailable.";
   }
@@ -74,6 +78,7 @@ export async function POST(request: Request) {
     planId: planId as PlanId,
     egpRate,
     egpDate,
+    egpCairoDay,
     egpError,
   };
 

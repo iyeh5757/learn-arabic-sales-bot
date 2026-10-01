@@ -16,6 +16,7 @@ export type AssistInput = {
   planId: PlanId;
   egpRate: number | null;
   egpDate: string | null;
+  egpCairoDay?: string | null;
   egpError: string | null;
 };
 
@@ -36,7 +37,7 @@ export function assistFacts(input: AssistInput): AssistFacts {
   const escalation = detectEscalation(blob);
   const book = buildPriceBook(
     input.egpRate != null && input.egpDate
-      ? { rate: input.egpRate, date: input.egpDate }
+      ? { rate: input.egpRate, date: input.egpDate, cairoDay: input.egpCairoDay ?? undefined }
       : null,
     input.egpError,
   );
@@ -45,8 +46,8 @@ export function assistFacts(input: AssistInput): AssistFacts {
   const amount = plan.prices[input.currency];
   const priceLine =
     amount == null
-      ? `${input.currency} is unavailable until today's Frankfurter USD rate loads. The USD list price for ${plan.name} is ${formatMoney(plan.prices.USD ?? 0, "USD")}.`
-      : `The list price for ${plan.name} is ${formatMoney(amount, input.currency)}.`;
+      ? `${input.currency} is unavailable until today's Frankfurter USD→EGP rate loads. The USD package price for ${plan.name} is ${formatMoney(plan.prices.USD ?? 0, "USD")}.`
+      : `The package price for ${plan.name} is ${formatMoney(amount, input.currency)}.`;
 
   return {
     trial,
@@ -60,12 +61,12 @@ export function assistFacts(input: AssistInput): AssistFacts {
 
 export function customerTrialLine(trial: TrialDecision): string {
   if (trial.eligible) {
-    return "You can book a free trial lesson with a native teacher. The trial does not need a card.";
+    return "You can book a free 30-minute live trial with a native teacher. The trial does not need a card.";
   }
   if (trial.region === "unknown") {
-    return "Once the residence country is confirmed, the desk can say whether a live trial lesson is available. The free 10-minute level quiz is open either way.";
+    return "Once the residence country is confirmed, the desk can say whether a free 30-minute live trial is available.";
   }
-  return "A live trial lesson is not available for this residence. The free 10-minute level quiz is still open, and a paid plan can be quoted.";
+  return "A free 30-minute live trial is not available for this residence. I can quote a paid private package.";
 }
 
 function firstName(name: string): string {
@@ -91,18 +92,22 @@ export function customerDraft(input: AssistInput, facts: AssistFacts): string {
     ].join("\n");
   }
 
-  return [
+  const mentionsGroup = /group/i.test(`${input.userText}\n${input.customerMessage}`);
+  const lines = [
     hello,
     "",
     "Thank you for writing to Learn Arabic Academy.",
-    `We can start you in ${programLabel(input.program)} with a native teacher. Lessons are in English or German, and you can ask for a male or female teacher.`,
+    `We teach ${programLabel(input.program)} in private 1-to-1 lessons with a native teacher.`,
+  ];
+  if (mentionsGroup) lines.push("There is no group-class package.");
+  lines.push(
     facts.customerTrialLine,
     facts.priceLine,
-    "The free 10-minute level quiz is on learnarabic08.com and does not need a card.",
-    "Tell me which days suit you and I will suggest a plan from the list prices.",
+    "The 16-session 60-minute package is the most popular.",
     "",
     signoff(input.rep),
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 export function respondLocally(input: AssistInput): { text: string; facts: AssistFacts } {
@@ -127,18 +132,18 @@ export function respondLocally(input: AssistInput): { text: string; facts: Assis
   if (!wantsDraft && asksTrial) {
     return {
       facts,
-      text: `${facts.trial.reason} ${facts.customerTrialLine} The free 10-minute quiz stays available either way.`,
+      text: `${facts.trial.reason} ${facts.customerTrialLine}`,
     };
   }
 
   if (!wantsDraft && asksPrice) {
     return {
       facts,
-      text: `${facts.priceLine} GBP, EUR, and AED are list prices. EGP is USD times the daily Frankfurter rate${
+      text: `${facts.priceLine} USD, GBP, EUR, and AED are fixed package prices. AED is not calculated from an exchange rate. EGP is the USD package price times today's Frankfurter USD→EGP mid rate${
         facts.book.egp.rate != null
-          ? ` (${facts.book.egp.rate} on ${facts.book.egp.date}).`
-          : ". That rate is not loaded yet."
-      } Do not invent a discount. Pricing exceptions go to ${ESCALATION.name} on ${ESCALATION.phone}.`,
+          ? ` (${facts.book.egp.rate} on ${facts.book.egp.date}${facts.book.egp.cairoDay ? `, cached for Cairo day ${facts.book.egp.cairoDay}` : ""}).`
+          : ". That rate is not loaded, so no EGP figure is available."
+      } Lessons are private 1-to-1. The 16-session 60-minute package is the most popular. Do not invent a discount. Pricing exceptions go to ${ESCALATION.name} on ${ESCALATION.phone}.`,
     };
   }
 
@@ -190,14 +195,14 @@ export function buildGrokSystem(input: AssistInput, facts: AssistFacts): string 
     "You are the sales-desk assistant for Learn Arabic Academy reps (Mode A).",
     "Speak to the rep. When they ask for a customer reply, give a sendable draft they can copy.",
     "FACTS below are the source of truth. Do not invent prices, discounts, refunds, or trial exceptions.",
-    "Trial rule: a live trial lesson is eligible only when residence is outside Africa and Asia, except Gulf countries AE, SA, KW, QA, BH, and OM, which are eligible.",
-    "If FACTS.trial.eligible is false, do not offer a live trial lesson, a free class, or a complimentary lesson. The free 10-minute level quiz may still be mentioned.",
-    "If FACTS.trial.eligible is true, you may offer one free trial lesson with no card.",
-    "Quote only prices in FACTS. GBP, EUR, and AED are list prices. EGP equals USD times the daily Frankfurter rate in FACTS.egp. If that rate is null, do not invent an EGP figure.",
+    "Trial rule: one free 30-minute live trial is eligible only when residence is outside Africa and Asia, except Gulf countries AE, SA, KW, QA, BH, and OM, which are eligible.",
+    "If FACTS.trial.eligible is false, do not offer a free 30-minute live trial, a free class, or a complimentary lesson. Do not mention a quiz as a substitute.",
+    "If FACTS.trial.eligible is true, you may offer one free 30-minute live trial with no card.",
+    "Lessons are private 1-to-1 only. Programmes are Egyptian, Levantine, Gulf/Khaliji, MSA, and Quran. Do not invent group-class packages.",
+    "Quote only prices in FACTS. USD, GBP, EUR, and AED are fixed package prices. Never derive AED from an exchange rate. EGP equals the USD package price times today's Frankfurter USD→EGP mid rate in FACTS.egp. If that rate is null, do not invent an EGP figure.",
+    "The 16-session 60-minute package is the most popular.",
     "If FACTS.escalationDetected.required is true, do not resolve the issue and do not offer a discount. Hand off to Islam Yehia at +201093570811.",
-    "Recorded courses and books have no price in this desk. Send those price questions to Islam Yehia.",
-    "Lessons can be in English or German. Students may request a male or female teacher. Learners from age 6 are welcome.",
-    "Programs: Egyptian Arabic, Modern Standard Arabic, Quranic Arabic, Gulf Arabic, Levantine Arabic.",
+    "Do not quote products that are absent from FACTS.priceBook.",
     "Tone: warm, specific, and not pushy. No markdown headings. Keep a customer draft under 180 words.",
     "Match the customer's language when drafting if they wrote in Arabic or German. Otherwise use English unless the rep asks for another language.",
     "",

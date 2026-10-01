@@ -8,21 +8,19 @@ export type Continent =
 
 export type Currency = "USD" | "GBP" | "EUR" | "AED" | "EGP";
 
-export type ProgramId =
-  | "egyptian"
-  | "msa"
-  | "quranic"
-  | "gulf"
-  | "levantine"
-  | "unsure";
+export type ProgramId = "egyptian" | "levantine" | "gulf" | "msa" | "quran";
 
 export type PlanId =
-  | "private-30"
-  | "private-60"
-  | "group"
-  | "starter"
-  | "standard"
-  | "intensive";
+  | "60x4"
+  | "60x8"
+  | "60x12"
+  | "60x16"
+  | "60x20"
+  | "30x4"
+  | "30x8"
+  | "30x12"
+  | "30x16"
+  | "30x20";
 
 export type Stage =
   | "new"

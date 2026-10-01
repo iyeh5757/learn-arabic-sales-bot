@@ -1,94 +1,65 @@
 import type { Currency, PlanId } from "./types";
 
-/** Official USD/AED peg used for the AED column. 1 USD = 3.6725 AED. */
-export const AED_PER_USD_NUMERATOR = 36725;
-export const AED_PER_USD_DENOMINATOR = 10000;
-
 export type CatalogPlan = {
   id: PlanId;
   name: string;
   detail: string;
-  sessions: number;
-  minutes: number | null;
+  sessions: 4 | 8 | 12 | 16 | 20;
+  minutes: 30 | 60;
+  popular: boolean;
   usd: number;
   gbp: number;
   eur: number;
+  aed: number;
 };
 
+/** 16 × 60 minutes is the owner's most popular private package. */
+export const POPULAR_PLAN_ID: PlanId = "60x16";
+
+export const EGP_FORMULA =
+  "EGP = USD package price × today's Frankfurter USD→EGP mid rate" as const;
+
 /**
- * Live-lesson price book.
- * USD figures follow the public floors on signup.learnarabic08.com
- * (private 30 min from $22, private 60 min from $48, group from $15).
- * Monthly plans are that 30-minute list price times 4, 8, or 12 sessions.
- * GBP and EUR are fixed list prices. AED is the USD amount at the dirham peg.
- * EGP is not stored here.
+ * Owner package book. USD, GBP, EUR, and AED are fixed list prices.
+ * AED is not derived from a peg or from a live rate. EGP is applied later.
  */
 export const CATALOG: CatalogPlan[] = [
-  {
-    id: "private-30",
-    name: "Private 30-minute session",
-    detail: "Live 1-on-1. Public floor is $22.",
-    sessions: 1,
-    minutes: 30,
-    usd: 22,
-    gbp: 17,
-    eur: 20,
-  },
-  {
-    id: "private-60",
-    name: "Private 60-minute session",
-    detail: "Live 1-on-1. Public floor is $48.",
-    sessions: 1,
-    minutes: 60,
-    usd: 48,
-    gbp: 36,
-    eur: 44,
-  },
-  {
-    id: "group",
-    name: "Group class",
-    detail: "Shared class. Public floor is $15.",
-    sessions: 1,
-    minutes: null,
-    usd: 15,
-    gbp: 12,
-    eur: 14,
-  },
-  {
-    id: "starter",
-    name: "Starter month",
-    detail: "4 private 30-minute sessions.",
-    sessions: 4,
-    minutes: 30,
-    usd: 88,
-    gbp: 68,
-    eur: 80,
-  },
-  {
-    id: "standard",
-    name: "Standard month",
-    detail: "8 private 30-minute sessions.",
-    sessions: 8,
-    minutes: 30,
-    usd: 176,
-    gbp: 136,
-    eur: 160,
-  },
-  {
-    id: "intensive",
-    name: "Intensive month",
-    detail: "12 private 30-minute sessions.",
-    sessions: 12,
-    minutes: 30,
-    usd: 264,
-    gbp: 204,
-    eur: 240,
-  },
+  pack("60x4", 60, 4, 48, 44, 44, 176),
+  pack("60x8", 60, 8, 88, 80, 80, 323),
+  pack("60x12", 60, 12, 120, 108, 108, 441),
+  pack("60x16", 60, 16, 144, 128, 128, 529),
+  pack("60x20", 60, 20, 160, 140, 140, 587),
+  pack("30x4", 30, 4, 28, 28, 28, 103),
+  pack("30x8", 30, 8, 52, 52, 52, 191),
+  pack("30x12", 30, 12, 72, 72, 72, 264),
+  pack("30x16", 30, 16, 88, 88, 88, 323),
+  pack("30x20", 30, 20, 100, 100, 100, 367),
 ];
 
-export function aedFromUsd(usd: number): number {
-  const fils = Math.round((usd * AED_PER_USD_NUMERATOR) / 100);
-  return fils / 100;
+function pack(
+  id: PlanId,
+  minutes: 30 | 60,
+  sessions: 4 | 8 | 12 | 16 | 20,
+  usd: number,
+  gbp: number,
+  eur: number,
+  aed: number,
+): CatalogPlan {
+  const popular = id === POPULAR_PLAN_ID;
+  return {
+    id,
+    name: `${sessions} × ${minutes}-minute private lessons`,
+    detail: popular
+      ? "Private 1-to-1. Most popular package."
+      : "Private 1-to-1.",
+    sessions,
+    minutes,
+    popular,
+    usd,
+    gbp,
+    eur,
+    aed,
+  };
 }
 
 export function egpFromUsd(usd: number, usdToEgp: number): number {
@@ -100,7 +71,8 @@ export type PricedPlan = {
   name: string;
   detail: string;
   sessions: number;
-  minutes: number | null;
+  minutes: 30 | 60;
+  popular: boolean;
   prices: Record<Currency, number | null>;
 };
 
@@ -109,8 +81,9 @@ export type PriceBook = {
   egp: {
     rate: number | null;
     date: string | null;
+    cairoDay: string | null;
     source: string;
-    formula: "EGP = USD × daily Frankfurter rate";
+    formula: typeof EGP_FORMULA;
     error: string | null;
   };
 };
@@ -123,7 +96,7 @@ export function frankfurterSource(): string {
 }
 
 export function buildPriceBook(
-  fx: { rate: number; date: string } | null,
+  fx: { rate: number; date: string; cairoDay?: string } | null,
   error: string | null = null,
 ): PriceBook {
   return {
@@ -133,19 +106,21 @@ export function buildPriceBook(
       detail: plan.detail,
       sessions: plan.sessions,
       minutes: plan.minutes,
+      popular: plan.popular,
       prices: {
         USD: plan.usd,
         GBP: plan.gbp,
         EUR: plan.eur,
-        AED: aedFromUsd(plan.usd),
+        AED: plan.aed,
         EGP: fx ? egpFromUsd(plan.usd, fx.rate) : null,
       },
     })),
     egp: {
       rate: fx?.rate ?? null,
       date: fx?.date ?? null,
+      cairoDay: fx?.cairoDay ?? null,
       source: frankfurterSource(),
-      formula: "EGP = USD × daily Frankfurter rate",
+      formula: EGP_FORMULA,
       error,
     },
   };

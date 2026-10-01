@@ -3,7 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { seedLeads } from "./seed";
 import { isTrialStage, trialEligibility } from "./trial";
-import { isRep, TIMEZONES, WEEKDAYS } from "./reps";
+import { CATALOG, POPULAR_PLAN_ID } from "./pricing";
+import { isRep, PROGRAMS, TIMEZONES, WEEKDAYS } from "./reps";
 import type {
   Channel,
   Currency,
@@ -25,8 +26,8 @@ let cache: DeskData | null = null;
 let queue: Promise<void> = Promise.resolve();
 
 const CURRENCIES = new Set(["USD", "GBP", "EUR", "AED", "EGP"]);
-const PROGRAMS = new Set(["egyptian", "msa", "quranic", "gulf", "levantine", "unsure"]);
-const PLANS = new Set(["private-30", "private-60", "group", "starter", "standard", "intensive"]);
+const PROGRAM_IDS = new Set(PROGRAMS.map((item) => item.id));
+const PLAN_IDS = new Set(CATALOG.map((item) => item.id));
 const STAGES = new Set([
   "new",
   "qualified",
@@ -141,11 +142,11 @@ function cleanLead(input: LeadInput, base?: Lead): Omit<Lead, "id" | "messages" 
   if (!STAGES.has(stage)) throw new Error("Unknown stage.");
   assertTrialStage(stage, countryCode);
 
-  const program = (input.program ?? base?.program ?? "unsure") as ProgramId;
-  if (!PROGRAMS.has(program)) throw new Error("Unknown program.");
+  const program = (input.program ?? base?.program ?? "egyptian") as ProgramId;
+  if (!PROGRAM_IDS.has(program)) throw new Error("Unknown program.");
 
-  const planId = (input.planId ?? base?.planId ?? "private-30") as PlanId;
-  if (!PLANS.has(planId)) throw new Error("Unknown plan.");
+  const planId = (input.planId ?? base?.planId ?? POPULAR_PLAN_ID) as PlanId;
+  if (!PLAN_IDS.has(planId)) throw new Error("Unknown plan.");
 
   const currency = (input.currency ?? base?.currency ?? "USD") as Currency;
   if (!CURRENCIES.has(currency)) throw new Error("Unknown currency.");

@@ -15,7 +15,7 @@ export function trialEligibility(countryCode: string): TrialDecision {
       countryCode: "",
       countryName: "",
       continent: null,
-      reason: "Residence country is required before a trial lesson can be offered.",
+      reason: "Residence country is required before a free 30-minute live trial can be offered.",
     };
   }
 
@@ -27,7 +27,7 @@ export function trialEligibility(countryCode: string): TrialDecision {
       countryCode: code,
       countryName: "",
       continent: null,
-      reason: `${code} is not in the residence list, so a trial lesson cannot be offered.`,
+      reason: `${code} is not in the residence list, so a free 30-minute live trial cannot be offered.`,
     };
   }
 
@@ -38,7 +38,7 @@ export function trialEligibility(countryCode: string): TrialDecision {
       countryCode: code,
       countryName: country.name,
       continent: country.continent,
-      reason: `${country.name} is a Gulf residence (${code}). AE, SA, KW, QA, BH, and OM stay eligible for a trial lesson.`,
+      reason: `${country.name} is a Gulf residence (${code}). AE, SA, KW, QA, BH, and OM stay eligible for a free 30-minute live trial.`,
     };
   }
 
@@ -49,7 +49,7 @@ export function trialEligibility(countryCode: string): TrialDecision {
       countryCode: code,
       countryName: country.name,
       continent: country.continent,
-      reason: `${country.name} is in ${country.continent}. Trial lessons are not offered for residences in Africa or Asia, except Gulf countries AE, SA, KW, QA, BH, and OM.`,
+      reason: `${country.name} is in ${country.continent}. A free 30-minute live trial is not offered for residences in Africa or Asia, except Gulf countries AE, SA, KW, QA, BH, and OM.`,
     };
   }
 
@@ -59,7 +59,7 @@ export function trialEligibility(countryCode: string): TrialDecision {
     countryCode: code,
     countryName: country.name,
     continent: country.continent,
-    reason: `${country.name} is in ${country.continent}. Residences outside Africa and Asia are eligible for a trial lesson.`,
+      reason: `${country.name} is in ${country.continent}. Residences outside Africa and Asia are eligible for a free 30-minute live trial.`,
   };
 }
 

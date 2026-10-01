@@ -203,8 +203,8 @@ export function AdminDesk() {
       <section className="panel" style={{ marginTop: 16 }}>
         <h2>Price book</h2>
         <p className="lede">
-          USD follows the public live-lesson floors. GBP and EUR are fixed list prices. AED is the USD amount at 3.6725.
-          EGP is recalculated from the daily Frankfurter USD rate.
+          Private 1-to-1 packages only. USD, GBP, EUR, and AED are the owner list prices.
+          The 16 × 60-minute package is the most popular. EGP is the USD package price times today’s Frankfurter USD→EGP mid rate, cached for the Cairo day.
         </p>
         {book ? <PriceTable book={book} /> : <p className="muted">Loading prices…</p>}
       </section>

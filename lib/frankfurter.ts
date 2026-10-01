@@ -1,4 +1,15 @@
-export type FxQuote = { rate: number; date: string };
+export type ParsedFx = { rate: number; date: string };
+export type FxQuote = ParsedFx & { cairoDay: string };
+
+/** Calendar day in Africa/Cairo, YYYY-MM-DD. The EGP rate is cached for this day. */
+export function cairoCalendarDay(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
 
 type FxRow = { date?: string; base?: string; quote?: string; rate?: number };
 
@@ -6,7 +17,7 @@ type FxRow = { date?: string; base?: string; quote?: string; rate?: number };
  * Accept Frankfurter v2 rows, or the older `{ rates: { EGP } }` shape
  * when a deployment points FRANKFURTER_URL at a payload that includes EGP.
  */
-export function parseFrankfurter(payload: unknown): FxQuote {
+export function parseFrankfurter(payload: unknown): ParsedFx {
   if (Array.isArray(payload)) {
     const rows = payload.filter((row): row is FxRow & { rate: number; date: string } => {
       if (!row || typeof row !== "object") return false;
@@ -37,11 +48,11 @@ export function parseFrankfurter(payload: unknown): FxQuote {
   throw new Error("Unrecognised Frankfurter payload.");
 }
 
-let cache: { at: number; quote: FxQuote } | null = null;
-const TTL_MS = 60 * 60 * 1000;
+let cache: { cairoDay: string; quote: FxQuote } | null = null;
 
 export async function getUsdToEgp(fetchImpl: typeof fetch = fetch): Promise<FxQuote> {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.quote;
+  const cairoDay = cairoCalendarDay();
+  if (cache && cache.cairoDay === cairoDay) return cache.quote;
 
   const url =
     process.env.FRANKFURTER_URL ||
@@ -51,8 +62,9 @@ export async function getUsdToEgp(fetchImpl: typeof fetch = fetch): Promise<FxQu
   if (!response.ok) {
     throw new Error(`Frankfurter responded ${response.status}.`);
   }
-  const quote = parseFrankfurter(await response.json());
-  cache = { at: Date.now(), quote };
+  const parsed = parseFrankfurter(await response.json());
+  const quote: FxQuote = { ...parsed, cairoDay };
+  cache = { cairoDay, quote };
   return quote;
 }
 

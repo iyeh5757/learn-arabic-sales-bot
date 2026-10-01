@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildGrokSystem, customerDraft, respondLocally, type AssistInput } from "../lib/assistant";
 import { COUNTRIES } from "../lib/countries";
-import { parseFrankfurter } from "../lib/frankfurter";
 import { stubResult } from "../lib/integrations";
-import { aedFromUsd, buildPriceBook, egpFromUsd } from "../lib/pricing";
+import { cairoCalendarDay, clearFxCache, getUsdToEgp, parseFrankfurter } from "../lib/frankfurter";
+import { buildPriceBook, CATALOG, egpFromUsd, EGP_FORMULA } from "../lib/pricing";
 import { CONFIGURATION_REQUIRED, shiftsStatus } from "../lib/reps";
 import { GULF_COUNTRIES, trialEligibility } from "../lib/trial";
 import { grokCredentials } from "../lib/grok";
@@ -45,29 +45,42 @@ test("Gulf codes are Asia and still eligible", () => {
   assert.equal(trialEligibility("ZZ").region, "unknown");
 });
 
-test("AED list prices use the dirham peg and EGP uses the supplied rate", () => {
-  assert.equal(aedFromUsd(22), 80.8);
-  assert.equal(aedFromUsd(48), 176.28);
-  assert.equal(aedFromUsd(15), 55.09);
-  assert.equal(aedFromUsd(88), 323.18);
-  assert.equal(aedFromUsd(176), 646.36);
-  assert.equal(aedFromUsd(264), 969.54);
-  assert.equal(egpFromUsd(22, 52.052), 1145.14);
+test("package prices match the owner tables and EGP uses the USD price", () => {
+  const expected = {
+    "60x4": { usd: 48, gbp: 44, eur: 44, aed: 176 },
+    "60x8": { usd: 88, gbp: 80, eur: 80, aed: 323 },
+    "60x12": { usd: 120, gbp: 108, eur: 108, aed: 441 },
+    "60x16": { usd: 144, gbp: 128, eur: 128, aed: 529 },
+    "60x20": { usd: 160, gbp: 140, eur: 140, aed: 587 },
+    "30x4": { usd: 28, gbp: 28, eur: 28, aed: 103 },
+    "30x8": { usd: 52, gbp: 52, eur: 52, aed: 191 },
+    "30x12": { usd: 72, gbp: 72, eur: 72, aed: 264 },
+    "30x16": { usd: 88, gbp: 88, eur: 88, aed: 323 },
+    "30x20": { usd: 100, gbp: 100, eur: 100, aed: 367 },
+  } as const;
 
-  const book = buildPriceBook({ rate: 52.052, date: "2026-09-30" });
-  const byId = Object.fromEntries(book.plans.map((plan) => [plan.id, plan]));
-  assert.equal(byId["starter"].prices.USD, (byId["private-30"].prices.USD ?? 0) * 4);
-  assert.equal(byId["starter"].prices.GBP, (byId["private-30"].prices.GBP ?? 0) * 4);
-  assert.equal(byId["starter"].prices.EUR, (byId["private-30"].prices.EUR ?? 0) * 4);
-  assert.equal(byId["standard"].prices.USD, (byId["private-30"].prices.USD ?? 0) * 8);
-  assert.equal(byId["intensive"].prices.USD, (byId["private-30"].prices.USD ?? 0) * 12);
-  assert.equal(byId["private-60"].prices.USD, 48);
-  assert.equal(byId["private-30"].prices.EGP, 1145.14);
-  assert.equal(book.egp.formula, "EGP = USD × daily Frankfurter rate");
+  assert.equal(CATALOG.length, 10);
+  assert.equal(CATALOG.some((plan) => plan.id.includes("group")), false);
+  const book = buildPriceBook({ rate: 52.052, date: "2026-09-30", cairoDay: "2026-09-30" });
+  assert.equal(book.plans.length, 10);
+  for (const plan of book.plans) {
+    const row = expected[plan.id];
+    assert.equal(plan.prices.USD, row.usd);
+    assert.equal(plan.prices.GBP, row.gbp);
+    assert.equal(plan.prices.EUR, row.eur);
+    assert.equal(plan.prices.AED, row.aed);
+    assert.equal(plan.prices.EGP, egpFromUsd(row.usd, 52.052));
+    assert.notEqual(plan.prices.AED, Math.round(row.usd * 3.6725 * 100) / 100);
+  }
+  assert.equal(book.plans.find((plan) => plan.popular)?.id, "60x16");
+  assert.equal(book.plans.find((plan) => plan.id === "60x16")?.prices.USD, 144);
+  assert.equal(book.plans.find((plan) => plan.id === "60x16")?.prices.AED, 529);
+  assert.equal(book.plans.find((plan) => plan.id === "60x16")?.prices.EGP, 7495.49);
+  assert.equal(book.egp.formula, EGP_FORMULA);
 
   const missing = buildPriceBook(null, "offline");
-  assert.equal(missing.plans[0].prices.EGP, null);
-  assert.equal(missing.plans[0].prices.USD, 22);
+  assert.equal(missing.plans.find((plan) => plan.id === "60x16")?.prices.EGP, null);
+  assert.equal(missing.plans.find((plan) => plan.id === "60x16")?.prices.AED, 529);
   assert.equal(missing.egp.error, "offline");
 });
 
@@ -87,18 +100,43 @@ test("Frankfurter parser accepts v2 rows and a rates object", () => {
   assert.throws(() => parseFrankfurter({ date: "2026-09-30", rates: { GBP: 0.75 } }));
 });
 
+test("the USD to EGP rate is cached for the Cairo day", async () => {
+  const beforeMidnight = cairoCalendarDay(new Date("2026-03-01T20:00:00.000Z"));
+  const afterMidnight = cairoCalendarDay(new Date("2026-03-01T23:00:00.000Z"));
+  assert.equal(beforeMidnight, "2026-03-01");
+  assert.equal(afterMidnight, "2026-03-02");
+
+  clearFxCache();
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify([{ date: "2026-09-30", base: "USD", quote: "EGP", rate: 52.052 }]),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  const first = await getUsdToEgp(fetchImpl);
+  const second = await getUsdToEgp(fetchImpl);
+  assert.equal(calls, 1);
+  assert.equal(first.rate, 52.052);
+  assert.equal(second.cairoDay, cairoCalendarDay());
+  clearFxCache();
+});
+
 test("customer drafts obey trial and escalation rules", () => {
   const egypt = respondLocally(sample({
     countryCode: "EG",
     currency: "EGP",
     customerName: "Omar Hassan",
     rep: "Kamal",
-    planId: "private-60",
+    planId: "60x16",
     customerMessage: "Do you have a free trial?",
   }));
   assert.match(egypt.text, /not available/i);
-  assert.doesNotMatch(egypt.text, /book a free trial/i);
-  assert.match(egypt.text, /2,498\.50/);
+  assert.doesNotMatch(egypt.text, /book a free 30-minute/i);
+  assert.doesNotMatch(egypt.text, /quiz/i);
+  assert.match(egypt.text, /7,495\.49/);
+  assert.match(egypt.text, /private 1-to-1/i);
 
   const uae = respondLocally(sample({
     countryCode: "AE",
@@ -107,27 +145,31 @@ test("customer drafts obey trial and escalation rules", () => {
     rep: "Rebeb",
     customerMessage: "Can I try a class before I pay?",
   }));
-  assert.match(uae.text, /free trial lesson/i);
+  assert.match(uae.text, /free 30-minute live trial/i);
+  assert.match(uae.text, /529\.00/);
+  assert.doesNotMatch(uae.text, /quiz/i);
   assert.equal(uae.facts.trial.region, "gulf");
 
   const discount = respondLocally(sample({
     countryCode: "DE",
     currency: "EUR",
     customerName: "Lukas Weber",
-    customerMessage: "I want a discount on the intensive plan.",
-    planId: "intensive",
+    customerMessage: "I want a discount on the 16-session package.",
+    planId: "60x16",
   }));
   assert.match(discount.text, /Islam Yehia/);
   assert.match(discount.text, /\+201093570811/);
-  assert.doesNotMatch(discount.text, /book a free trial/i);
+  assert.doesNotMatch(discount.text, /book a free 30-minute/i);
   assert.equal(discount.facts.escalation.required, true);
 
   const direct = customerDraft(
     sample({ countryCode: "GB", currency: "GBP", customerName: "Sarah Mitchell", rep: "Asmaa" }),
     respondLocally(sample({ countryCode: "GB", currency: "GBP", customerName: "Sarah Mitchell", rep: "Asmaa" })).facts,
   );
-  assert.match(direct, /free trial lesson/i);
+  assert.match(direct, /free 30-minute live trial/i);
   assert.match(direct, /Asmaa/);
+  assert.match(direct, /most popular/i);
+  assert.doesNotMatch(direct, /quiz/i);
 });
 
 test("Grok prompt carries the Gulf rule and escalation contact", () => {
@@ -137,7 +179,11 @@ test("Grok prompt carries the Gulf rule and escalation contact", () => {
   assert.match(prompt, /AE, SA, KW, QA, BH, and OM/);
   assert.match(prompt, /Islam Yehia/);
   assert.match(prompt, /\+201093570811/);
-  assert.match(prompt, /do not offer a live trial/i);
+  assert.match(prompt, /do not offer a free 30-minute live trial/i);
+  assert.match(prompt, /do not mention a quiz/i);
+  assert.match(prompt, /private 1-to-1/i);
+  assert.match(prompt, /Do not invent group-class packages/);
+  assert.match(prompt, /"AED": 529/);
   assert.match(prompt, /"eligible": false/);
 });
 
@@ -176,7 +222,7 @@ function sample(overrides: Partial<AssistInput>): AssistInput {
     rep: "Asmaa",
     currency: "USD",
     program: "egyptian",
-    planId: "private-30",
+    planId: "60x16",
     egpRate: 52.052,
     egpDate: "2026-09-30",
     egpError: null,
