@@ -32,7 +32,12 @@ export function replyWithoutGrok(input: {
       ? "Grok is not connected. Set XAI_API_KEY (or GROK_API_KEY) on the server before Assist can write a customer draft. No sales reply was written."
       : `Grok did not respond${input.grokError ? ` (${input.grokError})` : ""}. No sales reply was written. Check XAI_API_KEY on the server and try again.`;
 
-  const blob = [input.userText, input.customerMessage ?? "", input.notes ?? ""].join("\n");
+  const drafting = /draft a (short )?whatsapp reply|draft a customer reply|what should i (reply|say)/i.test(
+    input.userText,
+  );
+  const blob = drafting
+    ? [input.customerMessage ?? "", input.notes ?? ""].join("\n")
+    : [input.userText, input.customerMessage ?? "", input.notes ?? ""].join("\n");
   const parts = [headline];
   const toolsUsed: string[] = [];
   const factLines: string[] = [];

@@ -117,7 +117,7 @@ export function AssistDesk() {
     const paste = customerMessage.trim();
     return [
       "Draft a short WhatsApp reply for me to copy. Do not send it.",
-      "If they did not ask for a price or a trial, welcome them and ask one discovery question. Do not open with a trial, a package, or a price.",
+      "If they only said they want to start, welcome them and ask one question about their level or their goal.",
       "",
       paste ? `Customer message:\n${paste}` : "No customer message was pasted.",
     ].join("\n");

@@ -327,6 +327,31 @@ test("Ahmed in Germany gets a welcome, not a trial or a price list", () => {
   assert.equal(firstDraftViolations(fromDump.customerDraft).length, 0);
   assert.doesNotMatch(fromDump.customerDraft, /trial|most popular|£/i);
 
+  const unconfigured = replyWithoutGrok({
+    reason: "unconfigured",
+    userText: [
+      "Draft a short WhatsApp reply for me to copy. Do not send it.",
+      "If they only said they want to start, welcome them and ask one question about their level or their goal.",
+      "",
+      "Customer message:",
+      "hey i want to start online sessions",
+    ].join("\n"),
+    customerMessage: "hey i want to start online sessions",
+    customerName: "Ahmed",
+    countryCode: "DE",
+    program: "egyptian",
+    planId: "60x16",
+    currency: "GBP",
+    fx: { rate: 51.973, date: "2026-10-01" },
+    fxError: null,
+  });
+  assert.match(unconfigured.text, /Grok is not connected/);
+  assert.doesNotMatch(unconfigured.text, /Verified tool facts/);
+  assert.doesNotMatch(unconfigured.text, /most popular/i);
+  assert.doesNotMatch(unconfigured.text, /£128|\$144|16 × 60/);
+  assert.doesNotMatch(unconfigured.text, /Draft to copy/);
+  assert.doesNotMatch(unconfigured.text, /free 30-minute live trial/i);
+
   const priceAsk = applyFirstReplyGuard({
     reply: "Draft to copy\nThe 16 × 60-minute package is £128.",
     customerMessage: "how much is the 16 session package?",
